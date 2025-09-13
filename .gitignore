@@ -40,3 +40,7 @@ diagnostics/
 # VSCode / IDE
 .vscode/
 .idea/
+scripts/data/raw/
+scripts/data/processed/
+*.csv
+*.parquet
