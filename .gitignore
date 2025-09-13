@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+*.egg
+
+# Virtual environments
+.venv/
+env/
+venv/
+ENV/
+
+# Logs
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project data folders
+data/raw/
+data/processed/
+diagnostics/
+
+# Large file formats
+*.csv
+*.parquet
+*.fst
+*.h5
+*.hdf5
+*.zip
+*.gz
+
+# VSCode / IDE
+.vscode/
+.idea/
