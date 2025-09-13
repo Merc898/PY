@@ -1,0 +1,47 @@
+============================================================
+DIAGNOSTIC REPORT
+Generated: 2025-09-13 12:13:02.224068
+============================================================
+
+## OVERVIEW
+• total_obs: 3106200
+• symbols: 547
+• date_min: 2000-01-03 23:00:00
+• date_max: 2025-09-12 04:00:00
+
+## QUALITY
+• total_obs: 3106200
+• unique_symbols: 547
+• stale_prices: 20
+
+## CORPORATE
+• count: 8
+• symbols: 8
+• sample: [{'symbol': 'WMB', 'date': Timestamp('2002-07-30 04:00:00'), 'return': 1.4343425215291523}, {'symbol': 'HIG', 'date': Timestamp('2008-12-08 05:00:00'), 'return': 1.0610252987800304}, {'symbol': 'MS', 'date': Timestamp('2008-10-13 04:00:00'), 'return': 0.8698342821013842}, {'symbol': 'LVS', 'date': Timestamp('2008-10-29 04:00:00'), 'return': 0.8000004369207363}, {'symbol': 'MSTR', 'date': Timestamp('2001-04-19 04:00:00'), 'return': 0.7643096702494476}]
+
+## CURRENCY
+• currencies: {'EUR': 29, 'GBP': 1, 'USD': 517}
+
+## COVERAGE
+• currency_counts: {'EUR': 29, 'GBP': 1, 'USD': 517}
+• avg_obs: 5678.610603290676
+• poor_coverage: 125
+
+## RETURNS
+• mean: 0.0007065736877513426
+• std: 0.023313981650748276
+• skew: 0.4455526428412117
+• kurtosis: 27.24570262641086
+• p1: -0.06355867729988274
+• p99: 0.06779675646190308
+• gt_100: 2
+• lt_-90: 0
+
+## OUTLIERS
+• price_outlier_symbols: 34
+• volume_outliers: 3107
+
+## SURVIVORSHIP
+• survival_rate: 1.0
+• comment: Possible survivorship bias if near 1.0
+
