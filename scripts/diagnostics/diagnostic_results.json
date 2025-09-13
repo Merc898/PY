@@ -1,0 +1,53 @@
+{
+  "data_overview": {
+    "total_observations": 3106200,
+    "unique_symbols": 547,
+    "date_range": "2000-01-03 23:00:00 to 2025-09-12 04:00:00",
+    "total_days": 9383,
+    "columns": [
+      "date",
+      "symbol",
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume",
+      "currency"
+    ],
+    "symbols_by_currency": {
+      "EUR": 29,
+      "GBP": 1,
+      "USD": 517
+    }
+  },
+  "data_quality": {
+    "duplicate_entries": "0",
+    "price_inconsistencies": "4974"
+  },
+  "corporate_actions": {
+    "potential_splits": 194,
+    "affected_symbols": 109
+  },
+  "currency_check": {
+    "unique_currencies": [
+      "USD",
+      "EUR",
+      "GBP"
+    ]
+  },
+  "coverage_analysis": {
+    "avg_obs_per_symbol": 5678.610603290676
+  },
+  "return_analysis": {
+    "mean": 0.0007073767248816767,
+    "std": 0.023335920735960386,
+    "skew": 0.5490588330415898,
+    "kurtosis": 33.091150436415006
+  },
+  "outlier_analysis": {
+    "volume_outliers": 12809
+  },
+  "survivorship_bias": {
+    "symbols_missing_recent": 0
+  }
+}
