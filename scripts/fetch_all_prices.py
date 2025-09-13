@@ -233,7 +233,7 @@ class DataFetcher:
         # Combine all price data
         if all_prices:
             prices_df = pd.concat(all_prices, ignore_index=True)
-            prices_df['date'] = pd.to_datetime(prices_df['date'])
+            prices_df['date'] = pd.to_datetime(prices_df['date'], utc=True).dt.tz_convert(None)
             prices_df = prices_df.sort_values(['symbol', 'date'])
 
             # Fetch FX rates

@@ -198,7 +198,9 @@ class MomentumStrategy:
     def form_portfolios(self, signals_df: pd.DataFrame, returns_df: pd.DataFrame) -> pd.DataFrame:
         """Form long-short portfolios based on momentum"""
         logger.info("Forming portfolios...")
-
+        if signals_df.empty:
+            logger.warning("No momentum signals available - skipping portfolio formation")
+            return pd.DataFrame()
         # Merge signals with next month's returns
         signals_df = signals_df.copy()
         returns_df = returns_df.copy()

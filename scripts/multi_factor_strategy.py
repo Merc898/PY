@@ -635,7 +635,9 @@ class MultiFactorStrategy:
 
         # Load and prepare data
         df = self.load_and_prepare_data(data_path)
-
+        if df.empty:
+            logger.error("No data available for backtest")
+            return {}
         # Calculate all factors
         df = self.calculate_all_factors(df)
 

@@ -23,9 +23,11 @@ logger = logging.getLogger(__name__)
 class FactorPipeline:
     """Complete factor investing pipeline orchestrator"""
 
-    def __init__(self):
+    def __init__(self, quick: bool = False):
         self.start_time = time.time()
         self.results = {}
+        # Quick mode limits data fetching for faster runs
+        self.quick = quick
 
     def check_environment(self) -> bool:
         """Check if all required packages are installed"""
@@ -92,7 +94,7 @@ class FactorPipeline:
             # Import and run fetch script
             from fetch_all_prices import DataFetcher
 
-            fetcher = DataFetcher()
+            fetcher = DataFetcher(max_tickers=5 if self.quick else None)
             data = fetcher.fetch_all_data(use_cache=not force_refresh)
 
             if data['prices'].empty:
