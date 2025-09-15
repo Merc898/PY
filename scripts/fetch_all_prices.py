@@ -1,223 +1,198 @@
 #!/usr/bin/env python3
 """
-diagnostics.py - Comprehensive diagnostics for fetched price data
-Outputs:
-  data/processed/diagnostic_report.txt
-  data/processed/diagnostics_summary.csv
-  data/processed/diagnostics_symbol_summary.csv
-  data/processed/diagnostics_top_moves.csv
-  data/processed/figures/*.png
+fetch_all_prices.py - Robust price data fetching with batch downloads
 """
 
 import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import logging
-from pathlib import Path
+import yfinance as yf
 from datetime import datetime
+import logging
+from typing import List
+from pathlib import Path
+import math
+import time
 
-# logging
-logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
-REPORT_DIR = Path("data/processed")
-FIG_DIR = REPORT_DIR / "figures"
-FIG_DIR.mkdir(parents=True, exist_ok=True)
 
+class DataFetcher:
+    def __init__(self, data_dir: str = "data"):
+        self.data_dir = Path(data_dir)
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        (self.data_dir / "raw").mkdir(exist_ok=True)
+        (self.data_dir / "processed").mkdir(exist_ok=True)
 
-class Diagnostics:
-    def __init__(self, data_path: Path):
-        self.data_path = Path(data_path)
-        REPORT_DIR.mkdir(parents=True, exist_ok=True)
-        self.report_txt = (REPORT_DIR / "diagnostic_report.txt").resolve()
-        self.summary_csv = (REPORT_DIR / "diagnostics_summary.csv").resolve()
-        self.symbol_csv = (REPORT_DIR / "diagnostics_symbol_summary.csv").resolve()
-        self.top_moves_csv = (REPORT_DIR / "diagnostics_top_moves.csv").resolve()
+    def get_sp500_tickers(self) -> List[str]:
+        try:
+            tables = pd.read_html(
+                "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
+                attrs={"class": "wikitable"},
+                flavor="bs4",
+                storage_options={"User-Agent": "Mozilla/5.0"}
+            )
+            df = tables[0]
+            return df["Symbol"].str.replace(".", "-").tolist()
+        except Exception as e:
+            logger.error(f"Failed to fetch S&P 500 tickers: {e}")
+            return ["AAPL", "MSFT", "GOOGL", "AMZN", "META"]
 
-    def load_data(self) -> pd.DataFrame:
-        logger.info(f"Using data file: {self.data_path}")
-        df = pd.read_parquet(self.data_path)
-        df.columns = [c.lower() for c in df.columns]
-        # check columns
-        need = {"date", "symbol", "close", "volume"}
-        missing = need - set(df.columns)
-        if missing:
-            raise ValueError(f"Missing required columns: {sorted(missing)}")
-        df["date"] = pd.to_datetime(df["date"])
+    def get_nasdaq100_tickers(self) -> List[str]:
+        try:
+            tables = pd.read_html(
+                "https://en.wikipedia.org/wiki/NASDAQ-100",
+                attrs={"class": "wikitable"},
+                flavor="bs4",
+                storage_options={"User-Agent": "Mozilla/5.0"}
+            )
+            for tbl in tables:
+                for col in ["Ticker", "Symbol", "Company", "Company name"]:
+                    if col in tbl.columns:
+                        tickers = tbl[col].astype(str).str.extract(r"([A-Z\.\-]+)")[0]
+                        tickers = tickers.dropna().str.replace(".", "-").tolist()
+                        return tickers
+            raise ValueError("No ticker column found in NASDAQ-100 tables")
+        except Exception as e:
+            logger.error(f"Failed to fetch NASDAQ-100 tickers: {e}")
+            return []
+
+    def get_euro_stoxx_tickers(self) -> List[str]:
+        return [
+            "AIR.PA", "ALV.DE", "ASML.AS", "BAS.DE", "BBVA.MC",
+            "BNP.PA", "CRH.L", "CS.PA", "DTE.DE", "DB1.DE",
+            "DBK.DE", "ENEL.MI", "ENGI.PA", "ENI.MI", "IBE.MC",
+            "INGA.AS", "ITX.MC", "MC.PA", "MUV2.DE", "OR.PA",
+            "PHIA.AS", "SAF.PA", "SAN.MC", "SAP.DE", "SIE.DE",
+            "SU.PA", "TTE.PA", "UNA.AS", "VIV.PA", "VOW3.DE"
+        ]
+
+    def clean_price_data(self, df: pd.DataFrame, ticker: str) -> pd.DataFrame:
+        if df.empty:
+            return df
+        initial = len(df)
+        df = df[df["Adj Close"].notna()]
+        df = df[df["Adj Close"] > 0]
+        removed = initial - len(df)
+        if removed > 50:
+            logger.info(f"{ticker}: Removed {removed} invalid rows")
         return df
 
-    def run_all(self) -> dict:
-        df = self.load_data()
-        res = {}
-        res["overview"] = self.data_overview(df)
-        res["quality"] = self.data_quality(df)
-        res["corporate"] = self.corporate_actions(df)
-        res["currency"] = self.currency_check(df)
-        res["coverage"] = self.coverage_analysis(df)
-        res["returns"] = self.return_analysis(df)
-        res["outliers"] = self.outlier_detection(df)
-        res["survivorship"] = self.survivorship_bias(df)
-        self.generate_report(res)
-        self.export_csvs(df, res)
-        self.export_charts(df)
-        return res
+    def fetch_batch(self, tickers: List[str], start_date: str) -> pd.DataFrame:
+        """Fetch a batch of tickers via yf.download"""
+        try:
+            data = yf.download(
+                tickers,
+                start=start_date,
+                end=datetime.now(),
+                group_by="ticker",
+                auto_adjust=False,
+                threads=True
+            )
+            all_prices = []
+            for t in tickers:
+                if t not in data:  # some tickers not returned
+                    continue
+                df = data[t].reset_index()
+                df["symbol"] = t
+                df = self.clean_price_data(df, t)
+                if not df.empty:
+                    all_prices.append(df)
+            return pd.concat(all_prices, ignore_index=True) if all_prices else pd.DataFrame()
+        except Exception as e:
+            logger.error(f"Batch fetch failed: {e}")
+            return pd.DataFrame()
 
-    # sections
-    def data_overview(self, df):
-        logger.info("\n📊 DATA OVERVIEW")
-        return {
-            "total_obs": int(len(df)),
-            "symbols": int(df["symbol"].nunique()),
-            "date_min": df["date"].min(),
-            "date_max": df["date"].max(),
-        }
+    def fetch_all_data(self, start_date: str = "1950-01-01", use_cache: bool = True) -> pd.DataFrame:
+        cache_file = self.data_dir / "raw" / "prices.parquet"
+        if use_cache and cache_file.exists():
+            logger.info("Loading cached data...")
+            return pd.read_parquet(cache_file)
 
-    def data_quality(self, df):
-        logger.info("\n🔍 DATA QUALITY CHECK")
-        # missing
-        missing_counts = df.isna().sum().to_dict()
-        # stale prices
-        stale = (df.groupby("symbol")["close"]
-                   .apply(lambda s: (s == s.shift()).rolling(5).sum().ge(5).any())
-                   .sum())
-        # zero volumes
-        zero_vol = int((df["volume"] == 0).sum())
-        # duplicates
-        dupes = int(df.duplicated().sum())
-        return {
-            "stale_price_symbols": int(stale),
-            "zero_volume_rows": zero_vol,
-            "duplicate_rows": dupes,
-            "missing_counts": missing_counts
-        }
+        logger.info("Fetching ticker lists...")
+        tickers = list(set(
+            self.get_sp500_tickers() +
+            self.get_nasdaq100_tickers() +
+            self.get_euro_stoxx_tickers()
+        ))
+        logger.info(f"Total unique tickers: {len(tickers)}")
 
-    def corporate_actions(self, df):
-        logger.info("\n🔄 CORPORATE ACTIONS DETECTION")
-        df = df.sort_values(["symbol", "date"]).copy()
-        df["ret"] = df.groupby("symbol")["close"].pct_change()
-        big = df.loc[df["ret"].abs() > 0.70, ["symbol", "date", "ret"]]
-        sample = big.reindex(big["ret"].abs().nlargest(10).index)
-        if not sample.empty:
-            sample.sort_values("date").to_csv(self.top_moves_csv, index=False)
-        return {
-            "events_gt70pct": int(len(big)),
-            "affected_symbols": int(big["symbol"].nunique()),
-        }
+        batch_size = 100
+        n_batches = math.ceil(len(tickers) / batch_size)
+        all_prices = []
+        failed = []
 
-    def currency_check(self, df):
-        logger.info("\n💱 CURRENCY CONSISTENCY CHECK")
-        if "currency" in df.columns:
-            counts = df.groupby("currency")["symbol"].nunique().to_dict()
-        else:
-            counts = {"UNKNOWN": int(df["symbol"].nunique())}
-        return {"currencies": counts}
+        for i in range(n_batches):
+            batch = tickers[i*batch_size:(i+1)*batch_size]
+            logger.info(f"Fetching batch {i+1}/{n_batches} ({len(batch)} tickers)")
+            df = self.fetch_batch(batch, start_date)
+            if df.empty:
+                failed.extend(batch)
+            else:
+                all_prices.append(df)
+            time.sleep(1)  # pause to avoid throttling
 
-    def coverage_analysis(self, df):
-        logger.info("\n📈 COVERAGE ANALYSIS")
-        cov = df.groupby("symbol")["date"].agg(["min", "max", "count"])
-        avg_obs = float(cov["count"].mean())
-        poor = int((cov["count"] < 0.8 * cov["count"].max()).sum())
-        cov.to_csv(self.symbol_csv)  # full per-symbol summary
-        return {
-            "avg_obs_per_symbol": avg_obs,
-            "symbols_lt80pct_of_max": poor,
-        }
+        # Retry failed tickers individually
+        if failed:
+            logger.info(f"Retrying {len(failed)} failed tickers individually...")
+            for t in failed:
+                try:
+                    df = yf.download(t, start=start_date, end=datetime.now(), auto_adjust=False)
+                    df = df.reset_index()
+                    df["symbol"] = t
+                    df = self.clean_price_data(df, t)
+                    if not df.empty:
+                        all_prices.append(df)
+                except Exception as e:
+                    logger.error(f"Failed {t}: {e}")
 
-    def return_analysis(self, df):
-        logger.info("\n📊 RETURN ANALYSIS")
-        df = df.sort_values(["symbol", "date"]).copy()
-        r = df.groupby("symbol")["close"].pct_change().dropna()
-        clipped = r[(r > -0.90) & (r < 1.00)]
-        return {
-            "mean": float(clipped.mean()),
-            "std": float(clipped.std()),
-            "skew": float(clipped.skew()),
-            "kurtosis": float(clipped.kurtosis()),
-            "p1": float(clipped.quantile(0.01)),
-            "p99": float(clipped.quantile(0.99)),
-            "gt_100pct_moves": int((r > 1.0).sum()),
-            "lt_-90pct_moves": int((r < -0.9).sum()),
-        }
+        if not all_prices:
+            logger.error("No data fetched.")
+            return pd.DataFrame()
 
-    def outlier_detection(self, df):
-        logger.info("\n🎯 OUTLIER DETECTION")
-        price_outlier_syms = (df.groupby("symbol")["close"]
-                                .apply(lambda s: (s.pct_change().abs() > 0.5).any())
-                                .sum())
-        vol_outliers = int((df["volume"] > df["volume"].quantile(0.999)).sum())
-        return {
-            "price_outlier_symbols": int(price_outlier_syms),
-            "volume_outlier_rows": vol_outliers,
-        }
+        prices = pd.concat(all_prices, ignore_index=True)
+        prices["Date"] = pd.to_datetime(prices["Date"], utc=True).dt.tz_localize(None)
+        prices = prices.rename(columns={
+            "Date": "date",
+            "Open": "open_raw",
+            "High": "high_raw",
+            "Low": "low_raw",
+            "Close": "close_raw",
+            "Adj Close": "close_adj",
+            "Volume": "volume"
+        })
+        prices = prices.sort_values(["symbol", "date"])
 
-    def survivorship_bias(self, df):
-        logger.info("\n🔎 SURVIVORSHIP BIAS CHECK")
-        latest = df["date"].max()
-        active_max = df.groupby("symbol")["date"].max()
-        survival_rate = float((active_max >= latest - pd.Timedelta(days=30)).mean())
-        return {"survival_rate": survival_rate}
+        prices.to_parquet(cache_file, compression="snappy")
+        prices.to_csv(self.data_dir / "raw" / "prices.csv", index=False)
+        logger.info(f"Saved data to {self.data_dir / 'raw'}")
 
-    # outputs
-    def generate_report(self, res: dict):
-        logger.info("\n📝 Generating diagnostic report...")
-        with open(self.report_txt, "w", encoding="utf-8") as f:
-            f.write("============================================================\n")
-            f.write("DIAGNOSTIC REPORT\n")
-            f.write(f"Generated: {datetime.now()}\n")
-            f.write("============================================================\n\n")
-            for section, content in res.items():
-                f.write(f"## {section.upper()}\n")
-                for k, v in content.items():
-                    f.write(f"• {k}: {v}\n")
-                f.write("\n")
-        logger.info(f"Report written to {self.report_txt}")
+        self.print_summary(prices)
+        return prices
 
-    def export_csvs(self, df, res):
-        rows = []
-        for sec, content in res.items():
-            for k, v in content.items():
-                rows.append({"section": sec, "metric": k, "value": v})
-        pd.DataFrame(rows).to_csv(self.summary_csv, index=False)
-        logger.info(f"Summary CSV -> {self.summary_csv}")
-
-    def export_charts(self, df):
-        logger.info("📈 Exporting charts...")
-        # active symbols per day
-        active_per_day = df.groupby("date")["symbol"].nunique()
-        plt.figure(figsize=(10,5))
-        active_per_day.plot()
-        plt.title("Active Symbols per Day")
-        plt.ylabel("Symbols")
-        plt.tight_layout()
-        plt.savefig(FIG_DIR / "active_symbols.png")
-        plt.close()
-
-        # return histogram
-        r = df.groupby("symbol")["close"].pct_change().dropna()
-        plt.figure(figsize=(8,5))
-        r.hist(bins=100, range=(-0.2,0.2))
-        plt.title("Distribution of Daily Returns")
-        plt.xlabel("Return")
-        plt.ylabel("Frequency")
-        plt.tight_layout()
-        plt.savefig(FIG_DIR / "returns_hist.png")
-        plt.close()
-
-        # volume distribution
-        plt.figure(figsize=(8,5))
-        df["volume"].clip(upper=df["volume"].quantile(0.99)).hist(bins=100)
-        plt.title("Distribution of Trading Volume (clipped at 99th pct)")
-        plt.xlabel("Volume")
-        plt.ylabel("Frequency")
-        plt.tight_layout()
-        plt.savefig(FIG_DIR / "volume_hist.png")
-        plt.close()
+    def print_summary(self, df: pd.DataFrame):
+        print("\n" + "=" * 60)
+        print("DATA SUMMARY")
+        print("=" * 60)
+        print(f"Total observations: {len(df):,}")
+        print(f"Unique symbols: {df['symbol'].nunique()}")
+        print(f"Date range: {df['date'].min()} to {df['date'].max()}")
+        coverage = df.groupby("symbol").agg({"date": ["min", "max", "count"]})
+        print(f"\nAverage obs per symbol: {coverage[('date', 'count')].mean():.0f}")
+        print(f"Symbols with >1000 obs: {(coverage[('date', 'count')] > 1000).sum()}")
+        print("=" * 60 + "\n")
 
 
 def main():
-    data_path = Path("data/processed/prices_clean.parquet")
-    diag = Diagnostics(data_path)
-    diag.run_all()
+    fetcher = DataFetcher()
+    logger.info("Starting data fetch process...")
+    data = fetcher.fetch_all_data(use_cache=False)
+    if data.empty:
+        return 1
+    logger.info("Data fetch completed.")
     return 0
 
 

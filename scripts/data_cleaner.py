@@ -1,224 +1,234 @@
 #!/usr/bin/env python3
 """
-verify_fixes.py - Test script to verify data quality fixes worked
-CREATE THIS AS: scripts/verify_fixes.py (OPTIONAL)
+diagnostics.py - Data diagnostics with plots and charts
+
+Outputs plots to: <this file's folder>/diagnostics
 """
 
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
 from pathlib import Path
 import logging
+import random
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# ── Output directory anchored to this file's folder ────────────────────────────
+THIS_DIR = Path(__file__).resolve().parent
+OUTPUT_DIR = THIS_DIR / "diagnostics"
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-def verify_data_quality():
-    """Verify the data cleaning fixes worked properly"""
+random.seed(42)
 
-    logger.info("🔍 VERIFYING DATA QUALITY FIXES")
-    logger.info("=" * 50)
+def get_price_column(df: pd.DataFrame) -> str:
+    if "close_adj" in df.columns:
+        return "close_adj"
+    if "close" in df.columns:
+        return "close"
+    if "close_raw" in df.columns:
+        return "close_raw"
+    raise KeyError("No close price column found (expected close_adj/close/close_raw)")
 
-    # Check if cleaned data exists
-    clean_file = Path("data/processed/prices_clean.parquet")
+# ── Coverage & Completeness ───────────────────────────────────────────────────
+def plot_time_coverage(df: pd.DataFrame):
+    logger.info("📈 Plotting time coverage heatmap...")
+    price_col = get_price_column(df)
 
+    pivot = df.pivot_table(index="symbol", columns="date", values=price_col, aggfunc="count").fillna(0)
+    plt.figure(figsize=(18, 10))
+    sns.heatmap(pivot, cmap="viridis", cbar=False)
+    plt.title("Time Coverage per Symbol", fontsize=14)
+    plt.xlabel("Date")
+    plt.ylabel("Symbol")
+    plt.tight_layout()
+    plt.savefig(OUTPUT_DIR / "time_coverage_heatmap.png", dpi=150)
+    plt.close()
+
+def plot_hist_series_length(df: pd.DataFrame):
+    logger.info("📈 Plotting histogram of series length...")
+    counts = df.groupby("symbol")["date"].count()
+    plt.figure(figsize=(10, 6))
+    sns.histplot(counts, bins=50, kde=False)
+    plt.title("Distribution of Series Length per Symbol")
+    plt.xlabel("Number of Observations")
+    plt.ylabel("Frequency")
+    plt.tight_layout()
+    plt.savefig(OUTPUT_DIR / "series_length_hist.png", dpi=150)
+    plt.close()
+
+def plot_missing_data(df: pd.DataFrame):
+    logger.info("📈 Plotting missing data heatmap...")
+    price_col = get_price_column(df)
+    pivot = df.pivot_table(index="date", columns="symbol", values=price_col, aggfunc="count")
+    plt.figure(figsize=(18, 10))
+    sns.heatmap(pivot.isna(), cmap="Reds", cbar=False)
+    plt.title("Missing Data Heatmap")
+    plt.xlabel("Symbol")
+    plt.ylabel("Date")
+    plt.tight_layout()
+    plt.savefig(OUTPUT_DIR / "missing_data_heatmap.png", dpi=150)
+    plt.close()
+
+def plot_trading_calendar_alignment(df: pd.DataFrame):
+    logger.info("📈 Plotting trading calendar alignment...")
+    counts = df.groupby("date")["symbol"].count()
+    plt.figure(figsize=(14, 6))
+    counts.plot()
+    plt.title("Number of Active Symbols per Trading Day")
+    plt.xlabel("Date")
+    plt.ylabel("Active Symbols")
+    plt.tight_layout()
+    plt.savefig(OUTPUT_DIR / "trading_calendar_alignment.png", dpi=150)
+    plt.close()
+
+# ── Price & Return Validity ───────────────────────────────────────────────────
+def plot_price_examples(df: pd.DataFrame, n=10):
+    logger.info("📈 Plotting price series examples...")
+    price_col = get_price_column(df)
+    uniq = list(df["symbol"].unique())
+    if not uniq:
+        return
+    sample_symbols = random.sample(uniq, min(n, len(uniq)))
+
+    plt.figure(figsize=(14, 8))
+    for sym in sample_symbols:
+        subset = df[df["symbol"] == sym]
+        plt.plot(subset["date"], subset[price_col], label=sym, alpha=0.7)
+    if len(sample_symbols) <= 20:
+        plt.legend()
+    plt.title("Sample Price Series")
+    plt.xlabel("Date")
+    plt.ylabel("Price")
+    plt.tight_layout()
+    plt.savefig(OUTPUT_DIR / "price_examples.png", dpi=150)
+    plt.close()
+
+def plot_return_distribution(df: pd.DataFrame):
+    logger.info("📈 Plotting return distribution...")
+    price_col = get_price_column(df)
+    df_sorted = df.sort_values(["symbol", "date"]).copy()
+    df_sorted["return"] = df_sorted.groupby("symbol")[price_col].pct_change()
+
+    plt.figure(figsize=(10, 6))
+    sns.histplot(df_sorted["return"].dropna(), bins=200, kde=True)
+    plt.title("Distribution of Daily Returns")
+    plt.xlabel("Daily Return")
+    plt.tight_layout()
+    plt.savefig(OUTPUT_DIR / "return_distribution.png", dpi=150)
+    plt.close()
+
+    plt.figure(figsize=(8, 6))
+    sns.boxplot(x=df_sorted["return"].dropna())
+    plt.title("Boxplot of Daily Returns")
+    plt.tight_layout()
+    plt.savefig(OUTPUT_DIR / "return_boxplot.png", dpi=150)
+    plt.close()
+
+def plot_cumulative_returns(df: pd.DataFrame, n=5):
+    logger.info("📈 Plotting cumulative log returns...")
+    price_col = get_price_column(df)
+    uniq = list(df["symbol"].unique())
+    if not uniq:
+        return
+    sample_symbols = random.sample(uniq, min(n, len(uniq)))
+
+    plt.figure(figsize=(14, 8))
+    for sym in sample_symbols:
+        subset = df[df["symbol"] == sym].sort_values("date")
+        r = subset[price_col].pct_change().dropna()
+        if r.empty:
+            continue
+        cum_log_ret = np.log1p(r).cumsum()
+        plt.plot(subset["date"].iloc[1:], cum_log_ret, label=sym)
+    if len(sample_symbols) <= 20:
+        plt.legend()
+    plt.title("Cumulative Log Returns (Sample)")
+    plt.xlabel("Date")
+    plt.ylabel("Cumulative Log Return")
+    plt.tight_layout()
+    plt.savefig(OUTPUT_DIR / "cumulative_returns.png", dpi=150)
+    plt.close()
+
+# ── Outlier Detection ─────────────────────────────────────────────────────────
+def plot_top_return_spikes(df: pd.DataFrame):
+    logger.info("📈 Plotting top return spikes...")
+    price_col = get_price_column(df)
+    df_sorted = df.sort_values(["symbol", "date"]).copy()
+    df_sorted["return"] = df_sorted.groupby("symbol")[price_col].pct_change()
+    abs_returns = df_sorted[["symbol", "date", "return"]].dropna().copy()
+    if abs_returns.empty:
+        return
+    abs_returns["abs_ret"] = abs_returns["return"].abs()
+    top = abs_returns.nlargest(20, "abs_ret")
+
+    plt.figure(figsize=(12, 6))
+    sns.barplot(data=top, x="date", y="abs_ret", hue="symbol", dodge=False)
+    plt.xticks(rotation=45)
+    plt.title("Top 20 One-Day Return Spikes")
+    plt.tight_layout()
+    plt.savefig(OUTPUT_DIR / "top_return_spikes.png", dpi=150)
+    plt.close()
+
+def plot_volume_anomalies(df: pd.DataFrame, n=5):
+    logger.info("📈 Plotting volume anomalies...")
+    if "volume" not in df.columns:
+        return
+    uniq = list(df["symbol"].unique())
+    if not uniq:
+        return
+    sample_symbols = random.sample(uniq, min(n, len(uniq)))
+
+    plt.figure(figsize=(14, 8))
+    for sym in sample_symbols:
+        subset = df[df["symbol"] == sym]
+        plt.plot(subset["date"], subset["volume"], label=sym, alpha=0.7)
+    if len(sample_symbols) <= 20:
+        plt.legend()
+    plt.title("Trading Volume (Sample)")
+    plt.xlabel("Date")
+    plt.ylabel("Volume")
+    plt.tight_layout()
+    plt.savefig(OUTPUT_DIR / "volume_anomalies.png", dpi=150)
+    plt.close()
+
+# ── Currency / Market Effects ─────────────────────────────────────────────────
+def plot_currency_split(df: pd.DataFrame):
+    logger.info("📈 Plotting currency split...")
+    if "currency" in df.columns:
+        plt.figure(figsize=(6, 6))
+        df["currency"].value_counts().plot.pie(autopct="%1.1f%%")
+        plt.title("Currency Split of Symbols")
+        plt.ylabel("")
+        plt.tight_layout()
+        plt.savefig(OUTPUT_DIR / "currency_split.png", dpi=150)
+        plt.close()
+
+# ── Main Runner ───────────────────────────────────────────────────────────────
+def run_all_diagnostics():
+    logger.info("🔍 Running all diagnostics...")
+
+    clean_file = THIS_DIR.parent / "data" / "processed" / "prices_clean.parquet"
     if not clean_file.exists():
-        logger.error("❌ Cleaned data file not found!")
-        logger.info("Run 'python run_all.py --refresh' first")
-        return False
+        logger.error(f"❌ Cleaned data not found at: {clean_file}")
+        return
 
-    # Load cleaned data
     df = pd.read_parquet(clean_file)
-    logger.info(f"📊 Loaded cleaned data: {len(df):,} observations")
 
-    # Test 1: Currency Check
-    logger.info("\n1️⃣ CURRENCY CHECK:")
-    if 'currency' in df.columns:
-        currencies = df['currency'].unique()
-        logger.info(f"   Currencies found: {currencies}")
+    plot_time_coverage(df)
+    plot_hist_series_length(df)
+    plot_missing_data(df)
+    plot_trading_calendar_alignment(df)
+    plot_price_examples(df)
+    plot_return_distribution(df)
+    plot_cumulative_returns(df)
+    plot_top_return_spikes(df)
+    plot_volume_anomalies(df)
+    plot_currency_split(df)
 
-        if len(currencies) == 1 and currencies[0] == 'USD':
-            logger.info("   ✅ PASS: Single currency (USD only)")
-        else:
-            logger.warning(f"   ❌ FAIL: Multiple currencies: {currencies}")
-            return False
-    else:
-        logger.info("   ⚠️  No currency column (assuming USD)")
-
-    # Test 2: Price Consistency Check
-    logger.info("\n2️⃣ PRICE CONSISTENCY CHECK:")
-
-    # Check for negative/zero prices
-    if 'close' in df.columns:
-        negative_prices = (df['close'] <= 0).sum()
-        if negative_prices == 0:
-            logger.info("   ✅ PASS: No negative/zero prices")
-        else:
-            logger.warning(f"   ❌ FAIL: {negative_prices} negative/zero prices found")
-            return False
-
-    # Check OHLC relationships
-    ohlc_cols = ['open', 'high', 'low', 'close']
-    if all(col in df.columns for col in ohlc_cols):
-        # High >= Low
-        hl_issues = (df['high'] < df['low']).sum()
-        if hl_issues == 0:
-            logger.info("   ✅ PASS: No High < Low issues")
-        else:
-            logger.warning(f"   ❌ FAIL: {hl_issues} High < Low issues")
-            return False
-
-        # High >= Open, Close
-        h_issues = ((df['high'] < df['open']) | (df['high'] < df['close'])).sum()
-        if h_issues == 0:
-            logger.info("   ✅ PASS: High >= Open/Close")
-        else:
-            logger.warning(f"   ❌ FAIL: {h_issues} High < Open/Close issues")
-            return False
-
-    # Test 3: Corporate Actions Check
-    logger.info("\n3️⃣ CORPORATE ACTIONS CHECK:")
-    df_sorted = df.sort_values(['symbol', 'date'])
-    df_sorted['daily_return'] = df_sorted.groupby('symbol')['close'].pct_change()
-
-    # Count extreme returns (should be capped)
-    extreme_pos = (df_sorted['daily_return'] > 0.5).sum()
-    extreme_neg = (df_sorted['daily_return'] < -0.5).sum()
-
-    if extreme_pos + extreme_neg <= 10:  # Allow a few edge cases
-        logger.info(f"   ✅ PASS: Only {extreme_pos + extreme_neg} extreme returns (>50%)")
-    else:
-        logger.warning(f"   ⚠️  WARNING: {extreme_pos + extreme_neg} extreme returns remain")
-        logger.info("   (May indicate remaining split issues)")
-
-    # Test 4: Data Quality Metrics
-    logger.info("\n4️⃣ DATA QUALITY METRICS:")
-
-    # Return statistics
-    returns = df_sorted['daily_return'].dropna()
-    if len(returns) > 0:
-        logger.info(f"   Return Mean: {returns.mean():.4f}")
-        logger.info(f"   Return Std: {returns.std():.4f}")
-        logger.info(f"   Kurtosis: {returns.kurtosis():.2f}")
-
-        # Good data should have kurtosis < 50 (yours was 33)
-        if returns.kurtosis() < 50:
-            logger.info("   ✅ PASS: Reasonable return distribution")
-        else:
-            logger.warning("   ⚠️  WARNING: High kurtosis - fat tails remain")
-
-    # Test 5: Data Completeness
-    logger.info("\n5️⃣ DATA COMPLETENESS:")
-    logger.info(f"   Total observations: {len(df):,}")
-    logger.info(f"   Unique symbols: {df['symbol'].nunique()}")
-    logger.info(f"   Date range: {df['date'].min().date()} to {df['date'].max().date()}")
-
-    # Check for missing values
-    missing = df.isnull().sum()
-    critical_missing = missing[missing > 0]
-
-    if len(critical_missing) == 0:
-        logger.info("   ✅ PASS: No missing values in critical columns")
-    else:
-        logger.info(f"   ⚠️  Missing values found:")
-        for col, count in critical_missing.items():
-            logger.info(f"     {col}: {count:,} missing")
-
-    # Test 6: Future Data Check
-    logger.info("\n6️⃣ FUTURE DATA CHECK:")
-    now = pd.Timestamp.now()
-    future_data = (df['date'] > now).sum()
-
-    if future_data == 0:
-        logger.info("   ✅ PASS: No future-dated observations")
-    else:
-        logger.warning(f"   ❌ FAIL: {future_data} future-dated observations")
-        return False
-
-    # Summary
-    logger.info("\n" + "=" * 50)
-    logger.info("🎉 DATA QUALITY VERIFICATION COMPLETE!")
-    logger.info("✅ All critical tests passed - data is ready for analysis")
-
-    return True
-
-
-def compare_before_after():
-    """Compare raw vs cleaned data statistics"""
-
-    logger.info("\n📈 BEFORE vs AFTER COMPARISON")
-    logger.info("=" * 50)
-
-    raw_files = [
-        "data/raw/price_data.parquet",
-        "data/raw/prices_combined.csv"
-    ]
-
-    raw_file = None
-    for file in raw_files:
-        if Path(file).exists():
-            raw_file = file
-            break
-
-    if not raw_file:
-        logger.info("No raw data file found for comparison")
-        return
-
-    clean_file = "data/processed/prices_clean.parquet"
-
-    if not Path(clean_file).exists():
-        logger.info("No clean data file found for comparison")
-        return
-
-    # Load both datasets
-    if raw_file.endswith('.parquet'):
-        raw_df = pd.read_parquet(raw_file)
-    else:
-        raw_df = pd.read_csv(raw_file)
-
-    clean_df = pd.read_parquet(clean_file)
-
-    logger.info("BEFORE (Raw Data):")
-    logger.info(f"  Observations: {len(raw_df):,}")
-    logger.info(f"  Symbols: {raw_df['symbol'].nunique()}")
-
-    if 'currency' in raw_df.columns:
-        currencies = raw_df['currency'].value_counts()
-        logger.info(f"  Currencies: {dict(currencies)}")
-
-    logger.info("\nAFTER (Clean Data):")
-    logger.info(f"  Observations: {len(clean_df):,}")
-    logger.info(f"  Symbols: {clean_df['symbol'].nunique()}")
-
-    if 'currency' in clean_df.columns:
-        currencies = clean_df['currency'].value_counts()
-        logger.info(f"  Currencies: {dict(currencies)}")
-
-    # Show what was removed
-    removed_obs = len(raw_df) - len(clean_df)
-    removed_symbols = raw_df['symbol'].nunique() - clean_df['symbol'].nunique()
-
-    logger.info(f"\nREMOVED:")
-    logger.info(f"  Observations: {removed_obs:,} ({removed_obs / len(raw_df) * 100:.1f}%)")
-    logger.info(f"  Symbols: {removed_symbols} ({removed_symbols / raw_df['symbol'].nunique() * 100:.1f}%)")
-
-
-def main():
-    """Run verification tests"""
-
-    success = verify_data_quality()
-
-    if success:
-        compare_before_after()
-        print("\n🎉 VERIFICATION PASSED - Your fixes worked!")
-        print("You can now run strategies on the cleaned data with confidence.")
-    else:
-        print("\n❌ VERIFICATION FAILED - Issues remain")
-        print("Check the logs above and ensure all fixes were properly implemented.")
-        return 1
-
-    return 0
-
+    logger.info(f"✅ Diagnostics complete. Plots saved in {OUTPUT_DIR}")
 
 if __name__ == "__main__":
-    exit(main())
+    run_all_diagnostics()
