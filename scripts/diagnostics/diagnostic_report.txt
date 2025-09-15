@@ -1,11 +1,9 @@
 ============================================================
 DATA DIAGNOSTICS REPORT
-Generated: 2025-09-13 12:36:23.440124
+Generated: 2025-09-13 17:22:47.065527
 ============================================================
 
 SUMMARY OF ISSUES FOUND:
 ----------------------------------------
-• ⚠️ Multiple currencies detected in dataset
-• ❌ 4974 price inconsistencies
-• ⚠️ 194 potential splits/corporate actions detected
-• ❌ Multiple currencies without FX adjustment
+• ❌ Missing values in 1 columns
+• ⚠️ 174 potential splits/corporate actions detected

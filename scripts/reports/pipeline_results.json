@@ -1,0 +1,7 @@
+{
+  "data_fetch": {
+    "success": true,
+    "source": "existing",
+    "file": "data/raw/price_data.parquet"
+  }
+}

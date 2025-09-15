@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 momentum_strategy.py - Properly implemented momentum strategy with financial integrity
+Updated with data quality fixes and currency handling
 """
 
 import pandas as pd
@@ -46,14 +47,14 @@ class StrategyConfig:
 
 
 class MomentumStrategy:
-    """Professional momentum strategy implementation"""
+    """Professional momentum strategy implementation with data quality fixes"""
 
     def __init__(self, config: StrategyConfig = None):
         self.config = config or StrategyConfig()
         self.results = {}
 
     def load_data(self, data_path: str) -> pd.DataFrame:
-        """Load and validate price data"""
+        """Load and validate price data - Updated with currency fixes"""
         logger.info("Loading price data...")
 
         # Load data
@@ -67,20 +68,35 @@ class MomentumStrategy:
         # Ensure date column is datetime
         df['date'] = pd.to_datetime(df['date'])
 
-        # CRITICAL: Use only USD-adjusted prices if available
+        # FIXED CURRENCY HANDLING:
         if 'close_usd' in df.columns:
+            # Use USD-adjusted prices
             logger.info("Using USD-adjusted prices")
             price_col = 'close_usd'
-        else:
-            logger.warning("USD-adjusted prices not found, using raw close prices")
-            price_col = 'close'
+        elif 'currency' in df.columns:
+            # Check currencies present
+            currencies = df['currency'].unique()
+            logger.info(f"Found currencies: {currencies}")
 
-            # Filter to USD-only securities if currency info available
-            if 'currency' in df.columns:
-                usd_only = df[df['currency'] == 'USD'].copy()
-                if len(usd_only) > 0:
-                    df = usd_only
-                    logger.info(f"Filtered to {df['symbol'].nunique()} USD securities")
+            if len(currencies) > 1:
+                logger.warning("⚠️ Multiple currencies detected!")
+                logger.info("🔧 Filtering to USD-only securities to avoid FX contamination")
+
+                # Show currency breakdown
+                for curr in currencies:
+                    count = (df['currency'] == curr).sum()
+                    symbols = df[df['currency'] == curr]['symbol'].nunique()
+                    logger.info(f"   {curr}: {count:,} obs, {symbols} symbols")
+
+                # Filter to USD ONLY - don't mix currencies
+                df = df[df['currency'] == 'USD'].copy()
+                logger.info(f"✅ Filtered to USD-only: {len(df):,} observations")
+
+            price_col = 'close'
+        else:
+            # No currency info - assume USD but warn user
+            logger.warning("⚠️ No currency information - assuming all prices are USD")
+            price_col = 'close'
 
         # Rename price column for consistency
         df['price'] = df[price_col]
@@ -94,11 +110,23 @@ class MomentumStrategy:
         # Remove duplicate entries
         df = df.drop_duplicates(subset=['symbol', 'date'])
 
+        # Basic price validation
+        df = df[df['price'] > 0]  # Remove negative/zero prices
+
+        # Remove obvious data errors (prices > $50,000)
+        df = df[df['price'] <= 50000]
+
         # Sort data
         df = df.sort_values(['symbol', 'date'])
 
         final_count = len(df)
-        logger.info(f"Data loaded: {final_count:,} observations ({initial_count - final_count:,} removed)")
+        removed_count = initial_count - final_count
+
+        logger.info(f"Data loaded and cleaned:")
+        logger.info(f"  Final observations: {final_count:,}")
+        logger.info(f"  Removed: {removed_count:,} problematic observations")
+        logger.info(f"  Unique symbols: {df['symbol'].nunique()}")
+        logger.info(f"  Date range: {df['date'].min().date()} to {df['date'].max().date()}")
 
         return df
 
@@ -201,6 +229,7 @@ class MomentumStrategy:
         if signals_df.empty:
             logger.warning("No momentum signals available - skipping portfolio formation")
             return pd.DataFrame()
+
         # Merge signals with next month's returns
         signals_df = signals_df.copy()
         returns_df = returns_df.copy()
@@ -530,14 +559,32 @@ def main():
     # Initialize strategy
     strategy = MomentumStrategy(config)
 
-    # Run backtest
+    # Use cleaned data if available, otherwise fallback to raw
     data_path = "data/processed/prices_clean.parquet"
 
     # Check if data exists
     if not Path(data_path).exists():
-        logger.error(f"Data file not found: {data_path}")
-        logger.info("Please run fetch_all_prices.py first to download data")
-        return 1
+        logger.error(f"Cleaned data file not found: {data_path}")
+        logger.info("Please run the full pipeline (run_all.py) first to clean data")
+
+        # Fallback to raw data with warning
+        raw_data_paths = [
+            "data/raw/price_data.parquet",
+            "data/raw/prices_combined.csv"
+        ]
+
+        raw_path_found = False
+        for raw_data_path in raw_data_paths:
+            if Path(raw_data_path).exists():
+                logger.warning("⚠️ Using raw data - results may be unreliable due to data quality issues")
+                logger.warning("⚠️ Consider running 'python run_all.py --refresh' to clean data first")
+                data_path = raw_data_path
+                raw_path_found = True
+                break
+
+        if not raw_path_found:
+            logger.error("No data files found! Run fetch_all_prices.py first.")
+            return 1
 
     # Run backtest
     results = strategy.run_backtest(data_path)
@@ -558,6 +605,14 @@ def main():
         strategy.plot_results(save_path=str(output_dir / "momentum_charts.png"))
 
         logger.info(f"Results saved to {output_dir}")
+
+        # Quick summary
+        metrics = results['metrics']
+        print(f"\n🎯 QUICK RESULTS SUMMARY:")
+        print(f"   Net Sharpe: {metrics['net_sharpe']:.3f}")
+        print(f"   Net Return: {metrics['net_annual_return'] * 100:.2f}% annually")
+        print(f"   Max Drawdown: {metrics['max_drawdown'] * 100:.2f}%")
+        print(f"   Significant: {'✅ Yes' if metrics['is_significant'] else '❌ No'}")
 
     return 0
 

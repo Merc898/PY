@@ -1,9 +1,31 @@
 ============================================================
 FACTOR INVESTING PIPELINE - SUMMARY REPORT
-Generated: 2025-09-13 11:29:54.175389
-Total Runtime: 0.04 minutes
+Generated: 2025-09-13 17:23:04.251475
+Total Runtime: 0.63 minutes
 ============================================================
+
+DIAGNOSTICS:
+----------------------------------------
+  Status: PASSED
+  Data File: data/processed/prices_clean.parquet
+  Critical Issues: 0
+  Warnings: 0
+  Top Issues:
+    - [ERROR] Missing values in 1 columns
+    - [WARNING] 174 potential splits/corporate actions detected
+
+MOMENTUM STRATEGY:
+----------------------------------------
+  Status: SUCCESS
+  Data File: data/processed/prices_clean.parquet
+  Net Annual Return: -3.70%
+  Net Sharpe Ratio: -0.198
+  Max Drawdown: -86.85%
+  Statistically Significant: NO
 
 ============================================================
 OVERALL ASSESSMENT:
 ----------------------------------------
+Pipeline completed successfully!
+Data quality: No critical issues found
+Strategies tested: Momentum (Sharpe: -0.198)

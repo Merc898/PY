@@ -1,0 +1,20 @@
+{
+  "diagnostics": {
+    "success": true,
+    "critical_issues": 0,
+    "warnings": 0,
+    "issues": [
+      "\u274c Missing values in 1 columns",
+      "\u26a0\ufe0f 174 potential splits/corporate actions detected"
+    ],
+    "data_file": "data/processed/prices_clean.parquet"
+  },
+  "momentum": {
+    "success": true,
+    "net_sharpe": -0.19767536538718578,
+    "net_return": -0.0370142289919545,
+    "max_drawdown": -0.8684637183856895,
+    "is_significant": "False",
+    "data_file": "data/processed/prices_clean.parquet"
+  }
+}

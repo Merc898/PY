@@ -1,9 +1,9 @@
 {
   "data_overview": {
-    "total_observations": 3106200,
-    "unique_symbols": 547,
-    "date_range": "2000-01-03 23:00:00 to 2025-09-12 04:00:00",
-    "total_days": 9383,
+    "total_observations": 2888357,
+    "unique_symbols": 517,
+    "date_range": "2000-01-04 05:00:00 to 2025-09-05 04:00:00",
+    "total_days": 9375,
     "columns": [
       "date",
       "symbol",
@@ -12,40 +12,39 @@
       "low",
       "close",
       "volume",
-      "currency"
+      "currency",
+      "daily_return"
     ],
     "symbols_by_currency": {
-      "EUR": 29,
-      "GBP": 1,
       "USD": 517
     }
   },
   "data_quality": {
-    "duplicate_entries": "0",
-    "price_inconsistencies": "4974"
+    "missing_values": {
+      "daily_return": 497
+    },
+    "duplicate_entries": "0"
   },
   "corporate_actions": {
-    "potential_splits": 194,
-    "affected_symbols": 109
+    "potential_splits": 174,
+    "affected_symbols": 103
   },
   "currency_check": {
     "unique_currencies": [
-      "USD",
-      "EUR",
-      "GBP"
+      "USD"
     ]
   },
   "coverage_analysis": {
-    "avg_obs_per_symbol": 5678.610603290676
+    "avg_obs_per_symbol": 5586.7640232108315
   },
   "return_analysis": {
-    "mean": 0.0007073767248816767,
-    "std": 0.023335920735960386,
-    "skew": 0.5490588330415898,
-    "kurtosis": 33.091150436415006
+    "mean": 0.0007170686398044888,
+    "std": 0.023306340276621887,
+    "skew": 0.4881003093715389,
+    "kurtosis": 28.231089409519672
   },
   "outlier_analysis": {
-    "volume_outliers": 12809
+    "volume_outliers": 11738
   },
   "survivorship_bias": {
     "symbols_missing_recent": 0

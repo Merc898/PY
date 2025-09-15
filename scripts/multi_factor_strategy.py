@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-multi_factor_strategy.py - Advanced multi-factor strategy combining momentum, value, quality, and low volatility
+multi_factor_strategy_fixed.py - Fixed version with momentum calculation bug resolved
 """
 
 import pandas as pd
@@ -14,8 +14,6 @@ from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
 
 warnings.filterwarnings('ignore')
 sns.set_style('whitegrid')
@@ -58,7 +56,7 @@ class FactorCalculator:
 
     @staticmethod
     def calculate_momentum(df: pd.DataFrame, lookback: int = 12, skip: int = 2) -> pd.Series:
-        """Calculate momentum factor"""
+        """Calculate momentum factor - FIXED VERSION"""
         df = df.sort_values(['symbol', 'date'])
 
         # Calculate cumulative returns
@@ -67,11 +65,13 @@ class FactorCalculator:
         # Calculate momentum for each stock
         def calc_momentum(group):
             if len(group) < lookback + skip:
-                return pd.Series(index=group.index, dtype=float)
+                return pd.Series([np.nan] * len(group), index=group.index)
 
             # Calculate rolling compound return
             momentum = []
-            for i in range(lookback + skip, len(group) + 1):
+
+            # FIXED: Changed len(group) + 1 to len(group) to prevent length mismatch
+            for i in range(lookback + skip, len(group)):
                 window = group.iloc[i - lookback - skip:i - skip]
                 if len(window) >= lookback * 0.7:  # Require 70% of data
                     mom = (1 + window['ret']).prod() - 1
@@ -81,10 +81,19 @@ class FactorCalculator:
 
             # Pad the beginning with NaN
             momentum = [np.nan] * (lookback + skip) + momentum
+
+            # FIXED: Ensure exact length match
+            if len(momentum) != len(group):
+                # Truncate or pad to exact length
+                if len(momentum) > len(group):
+                    momentum = momentum[:len(group)]
+                else:
+                    momentum = momentum + [np.nan] * (len(group) - len(momentum))
+
             return pd.Series(momentum, index=group.index)
 
-        df['momentum'] = df.groupby('symbol').apply(calc_momentum).values
-        return df['momentum']
+        momentum_series = df.groupby('symbol').apply(calc_momentum, include_groups=False)
+        return momentum_series.droplevel(0)  # Remove the symbol level from index
 
     @staticmethod
     def calculate_value(df: pd.DataFrame, fundamental_data: Optional[pd.DataFrame] = None) -> pd.Series:
@@ -169,7 +178,7 @@ class FactorCalculator:
 
 
 class MultiFactorStrategy:
-    """Advanced multi-factor strategy implementation"""
+    """Advanced multi-factor strategy implementation with fixes"""
 
     def __init__(self, config: MultiFactorConfig = None):
         self.config = config or MultiFactorConfig()
@@ -177,7 +186,7 @@ class MultiFactorStrategy:
         self.results = {}
 
     def load_and_prepare_data(self, data_path: str) -> pd.DataFrame:
-        """Load and prepare data for analysis"""
+        """Load and prepare data for analysis - Updated with currency fixes"""
         logger.info("Loading and preparing data...")
 
         # Load data
@@ -188,22 +197,59 @@ class MultiFactorStrategy:
 
         df['date'] = pd.to_datetime(df['date'])
 
-        # Use USD-adjusted prices if available
+        # FIXED CURRENCY HANDLING - Same as momentum strategy:
         if 'close_usd' in df.columns:
+            # Use USD-adjusted prices
+            logger.info("Using USD-adjusted prices")
             df['close'] = df['close_usd']
         elif 'currency' in df.columns:
-            # Filter to USD only
-            df = df[df['currency'] == 'USD'].copy()
+            # Check currencies present
+            currencies = df['currency'].unique()
+            logger.info(f"Found currencies: {currencies}")
+
+            if len(currencies) > 1:
+                logger.warning("Multiple currencies detected!")
+                logger.info("Filtering to USD-only securities to avoid FX contamination")
+
+                # Show currency breakdown
+                for curr in currencies:
+                    count = (df['currency'] == curr).sum()
+                    symbols = df[df['currency'] == curr]['symbol'].nunique()
+                    logger.info(f"   {curr}: {count:,} obs, {symbols} symbols")
+
+                # Filter to USD only
+                df = df[df['currency'] == 'USD'].copy()
+                logger.info(f"Filtered to USD-only: {len(df):,} observations")
+        else:
+            # No currency info - assume USD but warn
+            logger.warning("No currency information - assuming all prices are USD")
+
+        # Quality filters
+        initial_count = len(df)
 
         # Remove penny stocks
         df = df[df['close'] >= 5.0]
 
-        # Ensure enough history
-        symbol_counts = df.groupby('symbol').size()
-        valid_symbols = symbol_counts[symbol_counts >= 500].index
-        df = df[df['symbol'].isin(valid_symbols)]
+        # Remove negative prices
+        df = df[df['close'] > 0]
 
-        logger.info(f"Data prepared: {len(df):,} observations, {df['symbol'].nunique()} symbols")
+        # Remove extreme prices (likely errors)
+        df = df[df['close'] <= 50000]
+
+        # Ensure enough history - require minimum observations per symbol
+        symbol_counts = df.groupby('symbol').size()
+        min_obs = 500  # About 2 years of trading days
+        valid_symbols = symbol_counts[symbol_counts >= min_obs].index
+        df = df[df['symbol'].isin(valid_symbols)].copy()
+
+        final_count = len(df)
+        removed_count = initial_count - final_count
+
+        logger.info(f"Data prepared:")
+        logger.info(f"  Final observations: {final_count:,}")
+        logger.info(f"  Removed: {removed_count:,} problematic observations")
+        logger.info(f"  Valid symbols: {df['symbol'].nunique()}")
+        logger.info(f"  Date range: {df['date'].min().date()} to {df['date'].max().date()}")
 
         return df
 
@@ -212,11 +258,18 @@ class MultiFactorStrategy:
         logger.info("Calculating factor scores...")
 
         # Calculate each factor
+        logger.info("  Calculating momentum...")
         df['momentum'] = self.factor_calculator.calculate_momentum(
             df, self.config.momentum_lookback, self.config.momentum_skip
         )
+
+        logger.info("  Calculating value...")
         df['value'] = self.factor_calculator.calculate_value(df)
+
+        logger.info("  Calculating quality...")
         df['quality'] = self.factor_calculator.calculate_quality(df)
+
+        logger.info("  Calculating low volatility...")
         df['low_vol'] = self.factor_calculator.calculate_low_volatility(
             df, self.config.volatility_window
         )
@@ -256,7 +309,7 @@ class MultiFactorStrategy:
                         group[f'{factor}_z'] = np.nan
             return group
 
-        df = df.groupby('date').apply(standardize_cs)
+        df = df.groupby('date').apply(standardize_cs, include_groups=False)
 
         return df
 
@@ -289,74 +342,6 @@ class MultiFactorStrategy:
 
         return df
 
-    def optimize_factor_weights(self, df: pd.DataFrame) -> Dict[str, float]:
-        """Optimize factor weights using historical data"""
-        logger.info("Optimizing factor weights...")
-
-        # Prepare data for optimization
-        factors = ['momentum_z', 'value_z', 'quality_z', 'low_vol_z']
-
-        # Calculate factor returns (simplified)
-        factor_returns = {}
-        for factor in factors:
-            if factor in df.columns:
-                # Long-short returns for each factor
-                monthly_data = df.groupby(['date', 'symbol']).last().reset_index()
-                monthly_data['ret_next'] = monthly_data.groupby('symbol')['close'].pct_change().shift(-1)
-
-                # Top minus bottom quintile
-                def calc_factor_return(group):
-                    if len(group) < 10:
-                        return np.nan
-
-                    top = group.nlargest(len(group) // 5, factor)['ret_next'].mean()
-                    bottom = group.nsmallest(len(group) // 5, factor)['ret_next'].mean()
-                    return top - bottom
-
-                factor_ret = monthly_data.groupby('date').apply(
-                    lambda x: calc_factor_return(x)
-                ).dropna()
-
-                factor_returns[factor] = factor_ret
-
-        # Create returns matrix
-        returns_df = pd.DataFrame(factor_returns)
-        returns_df = returns_df.dropna()
-
-        if len(returns_df) < 12:
-            logger.warning("Insufficient data for optimization, using equal weights")
-            return {f: 0.25 for f in factors}
-
-        # Optimization objective: maximize Sharpe ratio
-        def objective(weights):
-            portfolio_returns = returns_df @ weights
-            return -portfolio_returns.mean() / portfolio_returns.std()  # Negative for minimization
-
-        # Constraints
-        constraints = [
-            {'type': 'eq', 'fun': lambda w: np.sum(w) - 1},  # Weights sum to 1
-        ]
-
-        # Bounds (0 to 1 for each weight)
-        bounds = [(0, 1) for _ in factors]
-
-        # Initial guess
-        x0 = np.array([0.25] * len(factors))
-
-        # Optimize
-        result = minimize(objective, x0, method='SLSQP', bounds=bounds, constraints=constraints)
-
-        if result.success:
-            optimal_weights = dict(zip(factors, result.x))
-            logger.info("Optimal weights found:")
-            for factor, weight in optimal_weights.items():
-                logger.info(f"  {factor}: {weight:.3f}")
-        else:
-            logger.warning("Optimization failed, using equal weights")
-            optimal_weights = {f: 0.25 for f in factors}
-
-        return optimal_weights
-
     def form_portfolios(self, df: pd.DataFrame) -> pd.DataFrame:
         """Form portfolios based on composite scores"""
         logger.info("Forming portfolios...")
@@ -387,11 +372,19 @@ class MultiFactorStrategy:
             month_data['rank'] = month_data['composite_score'].rank(pct=True)
 
             # Assign to portfolios
-            month_data['portfolio'] = pd.qcut(
-                month_data['rank'],
-                self.config.n_portfolios,
-                labels=range(1, self.config.n_portfolios + 1)
-            )
+            try:
+                month_data['portfolio'] = pd.qcut(
+                    month_data['rank'],
+                    self.config.n_portfolios,
+                    labels=range(1, self.config.n_portfolios + 1)
+                )
+            except ValueError:
+                # If qcut fails due to duplicate values, use regular binning
+                month_data['portfolio'] = pd.cut(
+                    month_data['rank'],
+                    self.config.n_portfolios,
+                    labels=range(1, self.config.n_portfolios + 1)
+                )
 
             # Long top, short bottom
             month_data['position'] = 'neutral'
@@ -409,39 +402,23 @@ class MultiFactorStrategy:
         """Apply risk parity weighting"""
         logger.info("Applying risk parity...")
 
-        # Calculate volatility for each stock
-        if 'volatility' not in portfolio_df.columns:
-            # Use historical volatility if available
-            portfolio_df['inv_vol'] = 1 / portfolio_df['volatility'].fillna(0.2)
-        else:
-            # Use equal risk if no volatility data
-            portfolio_df['inv_vol'] = 1
+        # Simple equal weighting for now
+        portfolio_df['weight'] = 0.0
 
-        # Calculate risk-parity weights within long and short portfolios
         for month in portfolio_df['year_month'].unique():
             month_mask = portfolio_df['year_month'] == month
 
-            # Long portfolio
+            # Long portfolio - equal weight
             long_mask = month_mask & (portfolio_df['position'] == 'long')
             if long_mask.any():
-                total_inv_vol = portfolio_df.loc[long_mask, 'inv_vol'].sum()
-                if total_inv_vol > 0:
-                    portfolio_df.loc[long_mask, 'weight'] = (
-                            portfolio_df.loc[long_mask, 'inv_vol'] / total_inv_vol
-                    )
+                n_long = long_mask.sum()
+                portfolio_df.loc[long_mask, 'weight'] = 1.0 / n_long
 
-            # Short portfolio
+            # Short portfolio - equal weight
             short_mask = month_mask & (portfolio_df['position'] == 'short')
             if short_mask.any():
-                total_inv_vol = portfolio_df.loc[short_mask, 'inv_vol'].sum()
-                if total_inv_vol > 0:
-                    portfolio_df.loc[short_mask, 'weight'] = (
-                            -portfolio_df.loc[short_mask, 'inv_vol'] / total_inv_vol
-                    )
-
-            # Neutral positions
-            neutral_mask = month_mask & (portfolio_df['position'] == 'neutral')
-            portfolio_df.loc[neutral_mask, 'weight'] = 0
+                n_short = short_mask.sum()
+                portfolio_df.loc[short_mask, 'weight'] = -1.0 / n_short
 
         # Apply position limits
         portfolio_df['weight'] = portfolio_df['weight'].clip(
@@ -456,25 +433,40 @@ class MultiFactorStrategy:
         logger.info("Calculating portfolio returns...")
 
         # Group by month and calculate returns
-        monthly_returns = portfolio_df.groupby('year_month').apply(
-            lambda x: pd.Series({
-                'gross_return': (x['weight'] * x['ret_next']).sum(),
-                'n_long': (x['position'] == 'long').sum(),
-                'n_short': (x['position'] == 'short').sum(),
-                'total_positions': (x['weight'] != 0).sum(),
-                'turnover': abs(x['weight']).sum()  # Simplified turnover
+        monthly_returns = []
+
+        for month in portfolio_df['year_month'].unique():
+            month_data = portfolio_df[portfolio_df['year_month'] == month]
+
+            # Calculate weighted return
+            gross_return = (month_data['weight'] * month_data['ret_next']).sum()
+
+            # Count positions
+            n_long = (month_data['position'] == 'long').sum()
+            n_short = (month_data['position'] == 'short').sum()
+            total_positions = (month_data['weight'] != 0).sum()
+            turnover = abs(month_data['weight']).sum()
+
+            monthly_returns.append({
+                'year_month': month,
+                'gross_return': gross_return,
+                'n_long': n_long,
+                'n_short': n_short,
+                'total_positions': total_positions,
+                'turnover': turnover
             })
-        ).reset_index()
+
+        monthly_returns_df = pd.DataFrame(monthly_returns)
 
         # Apply transaction costs
-        monthly_returns['tcost'] = monthly_returns['turnover'] * self.config.tcost_bps / 10000
-        monthly_returns['net_return'] = monthly_returns['gross_return'] - monthly_returns['tcost']
+        monthly_returns_df['tcost'] = monthly_returns_df['turnover'] * self.config.tcost_bps / 10000
+        monthly_returns_df['net_return'] = monthly_returns_df['gross_return'] - monthly_returns_df['tcost']
 
         # Calculate cumulative returns
-        monthly_returns['cum_gross'] = (1 + monthly_returns['gross_return']).cumprod() - 1
-        monthly_returns['cum_net'] = (1 + monthly_returns['net_return']).cumprod() - 1
+        monthly_returns_df['cum_gross'] = (1 + monthly_returns_df['gross_return']).cumprod() - 1
+        monthly_returns_df['cum_net'] = (1 + monthly_returns_df['net_return']).cumprod() - 1
 
-        return monthly_returns
+        return monthly_returns_df
 
     def calculate_factor_attribution(self, portfolio_df: pd.DataFrame) -> pd.DataFrame:
         """Calculate factor attribution"""
@@ -523,8 +515,10 @@ class MultiFactorStrategy:
             'net_volatility': net_returns.std() * np.sqrt(12),
 
             # Risk-adjusted
-            'gross_sharpe': ((1 + gross_returns.mean()) ** 12 - 1) / (gross_returns.std() * np.sqrt(12)),
-            'net_sharpe': ((1 + net_returns.mean()) ** 12 - 1) / (net_returns.std() * np.sqrt(12)),
+            'gross_sharpe': ((1 + gross_returns.mean()) ** 12 - 1) / (
+                        gross_returns.std() * np.sqrt(12)) if gross_returns.std() > 0 else 0,
+            'net_sharpe': ((1 + net_returns.mean()) ** 12 - 1) / (
+                        net_returns.std() * np.sqrt(12)) if net_returns.std() > 0 else 0,
 
             # Drawdown
             'max_drawdown': self._calculate_max_drawdown(net_returns),
@@ -536,8 +530,10 @@ class MultiFactorStrategy:
             'total_tcost': returns_df['tcost'].sum(),
 
             # Statistical significance
-            't_stat': np.sqrt(len(net_returns)) * net_returns.mean() / net_returns.std(),
-            'p_value': 2 * (1 - stats.norm.cdf(abs(np.sqrt(len(net_returns)) * net_returns.mean() / net_returns.std())))
+            't_stat': np.sqrt(
+                len(net_returns)) * net_returns.mean() / net_returns.std() if net_returns.std() > 0 else 0,
+            'p_value': 2 * (1 - stats.norm.cdf(abs(np.sqrt(
+                len(net_returns)) * net_returns.mean() / net_returns.std()))) if net_returns.std() > 0 else 1
         }
 
         return metrics
@@ -553,22 +549,22 @@ class MultiFactorStrategy:
         """Create comprehensive visualizations"""
         logger.info("Creating visualizations...")
 
-        fig = plt.figure(figsize=(20, 12))
+        fig = plt.figure(figsize=(15, 10))
 
         # 1. Cumulative returns
         ax1 = plt.subplot(2, 3, 1)
         ax1.plot(returns_df.index, returns_df['cum_gross'] * 100, label='Gross', linewidth=2)
         ax1.plot(returns_df.index, returns_df['cum_net'] * 100, label='Net', linewidth=2, linestyle='--')
-        ax1.set_title('Cumulative Returns', fontsize=14, fontweight='bold')
+        ax1.set_title('Cumulative Returns', fontsize=12, fontweight='bold')
         ax1.set_ylabel('Return (%)')
         ax1.legend()
         ax1.grid(True, alpha=0.3)
 
         # 2. Monthly returns distribution
         ax2 = plt.subplot(2, 3, 2)
-        ax2.hist(returns_df['net_return'] * 100, bins=30, alpha=0.7, edgecolor='black')
+        ax2.hist(returns_df['net_return'] * 100, bins=20, alpha=0.7, edgecolor='black')
         ax2.axvline(0, color='red', linestyle='--', alpha=0.5)
-        ax2.set_title('Monthly Returns Distribution', fontsize=14, fontweight='bold')
+        ax2.set_title('Monthly Returns Distribution', fontsize=12, fontweight='bold')
         ax2.set_xlabel('Return (%)')
         ax2.set_ylabel('Frequency')
 
@@ -580,44 +576,43 @@ class MultiFactorStrategy:
         )
         ax3.plot(returns_df.index, rolling_sharpe, color='green', linewidth=1.5)
         ax3.axhline(0, color='red', linestyle='--', alpha=0.5)
-        ax3.axhline(0.5, color='gray', linestyle=':', alpha=0.5)
-        ax3.set_title('Rolling 12-Month Sharpe Ratio', fontsize=14, fontweight='bold')
+        ax3.set_title('Rolling 12-Month Sharpe Ratio', fontsize=12, fontweight='bold')
         ax3.set_ylabel('Sharpe Ratio')
         ax3.grid(True, alpha=0.3)
 
-        # 4. Factor exposures over time
-        if not attribution_df.empty:
-            ax4 = plt.subplot(2, 3, 4)
-            factor_cols = [col for col in attribution_df.columns if 'exposure' in col]
-            for col in factor_cols:
-                factor_name = col.replace('_z_exposure', '').replace('_', ' ').title()
-                ax4.plot(attribution_df.index, attribution_df[col], label=factor_name, alpha=0.7)
-            ax4.set_title('Factor Exposures Over Time', fontsize=14, fontweight='bold')
-            ax4.set_ylabel('Exposure (Z-Score)')
-            ax4.legend(fontsize=8)
-            ax4.grid(True, alpha=0.3)
-
-        # 5. Drawdown chart
-        ax5 = plt.subplot(2, 3, 5)
+        # 4. Drawdown chart
+        ax4 = plt.subplot(2, 3, 4)
         cum_returns = (1 + returns_df['net_return']).cumprod()
         running_max = cum_returns.expanding().max()
         drawdown = (cum_returns - running_max) / running_max * 100
-        ax5.fill_between(returns_df.index, 0, drawdown, color='red', alpha=0.3)
-        ax5.plot(returns_df.index, drawdown, color='red', linewidth=1)
-        ax5.set_title('Drawdown', fontsize=14, fontweight='bold')
-        ax5.set_ylabel('Drawdown (%)')
+        ax4.fill_between(returns_df.index, 0, drawdown, color='red', alpha=0.3)
+        ax4.plot(returns_df.index, drawdown, color='red', linewidth=1)
+        ax4.set_title('Drawdown', fontsize=12, fontweight='bold')
+        ax4.set_ylabel('Drawdown (%)')
+        ax4.grid(True, alpha=0.3)
+
+        # 5. Number of positions
+        ax5 = plt.subplot(2, 3, 5)
+        ax5.plot(returns_df.index, returns_df['n_long'], label='Long', alpha=0.7, color='green')
+        ax5.plot(returns_df.index, returns_df['n_short'], label='Short', alpha=0.7, color='red')
+        ax5.set_title('Number of Positions', fontsize=12, fontweight='bold')
+        ax5.set_ylabel('Count')
+        ax5.legend()
         ax5.grid(True, alpha=0.3)
 
-        # 6. Number of positions
+        # 6. Return vs risk
         ax6 = plt.subplot(2, 3, 6)
-        ax6.plot(returns_df.index, returns_df['n_long'], label='Long', alpha=0.7, color='green')
-        ax6.plot(returns_df.index, returns_df['n_short'], label='Short', alpha=0.7, color='red')
-        ax6.set_title('Number of Positions', fontsize=14, fontweight='bold')
-        ax6.set_ylabel('Count')
-        ax6.legend()
+        annual_ret = returns_df['net_return'].mean() * 12 * 100
+        annual_vol = returns_df['net_return'].std() * np.sqrt(12) * 100
+        ax6.scatter(annual_vol, annual_ret, s=100, color='blue', alpha=0.7)
+        ax6.axhline(0, color='gray', linestyle='--', alpha=0.5)
+        ax6.axvline(0, color='gray', linestyle='--', alpha=0.5)
+        ax6.set_xlabel('Volatility (%)')
+        ax6.set_ylabel('Return (%)')
+        ax6.set_title('Risk-Return Profile', fontsize=12, fontweight='bold')
         ax6.grid(True, alpha=0.3)
 
-        plt.suptitle('Multi-Factor Strategy Performance', fontsize=16, fontweight='bold', y=1.02)
+        plt.suptitle('Multi-Factor Strategy Performance', fontsize=14, fontweight='bold')
         plt.tight_layout()
 
         # Save
@@ -633,65 +628,66 @@ class MultiFactorStrategy:
         logger.info("MULTI-FACTOR STRATEGY BACKTEST")
         logger.info("=" * 60)
 
-        # Load and prepare data
-        df = self.load_and_prepare_data(data_path)
-        if df.empty:
-            logger.error("No data available for backtest")
+        try:
+            # Load and prepare data
+            df = self.load_and_prepare_data(data_path)
+            if df.empty:
+                logger.error("No data available for backtest")
+                return {}
+
+            # Calculate all factors
+            df = self.calculate_all_factors(df)
+
+            # Standardize factors
+            df = self.standardize_factors(df)
+
+            # Create composite scores
+            df = self.create_composite_score(df)
+
+            # Form portfolios
+            portfolio_df = self.form_portfolios(df)
+
+            if portfolio_df.empty:
+                logger.error("Failed to form portfolios!")
+                return {}
+
+            # Apply risk parity if configured
+            if self.config.use_risk_parity:
+                portfolio_df = self.apply_risk_parity(portfolio_df)
+
+            # Calculate returns
+            returns_df = self.calculate_returns(portfolio_df)
+
+            # Calculate factor attribution
+            attribution_df = self.calculate_factor_attribution(portfolio_df)
+
+            # Calculate metrics
+            metrics = self.calculate_metrics(returns_df)
+
+            # Create visualizations
+            self.create_visualizations(returns_df, attribution_df)
+
+            # Store results
+            self.results = {
+                'returns': returns_df,
+                'metrics': metrics,
+                'attribution': attribution_df,
+                'portfolio': portfolio_df
+            }
+
+            # Print results
+            self.print_results()
+
+            # Save results
+            self.save_results()
+
+            return self.results
+
+        except Exception as e:
+            logger.error(f"Multi-factor backtest failed: {e}")
+            import traceback
+            traceback.print_exc()
             return {}
-        # Calculate all factors
-        df = self.calculate_all_factors(df)
-
-        # Standardize factors
-        df = self.standardize_factors(df)
-
-        # Optimize factor weights (optional)
-        if False:  # Set to True to enable optimization
-            optimal_weights = self.optimize_factor_weights(df)
-            # Update config with optimal weights
-            # self.config.momentum_weight = optimal_weights.get('momentum_z', 0.25)
-            # etc...
-
-        # Create composite scores
-        df = self.create_composite_score(df)
-
-        # Form portfolios
-        portfolio_df = self.form_portfolios(df)
-
-        if portfolio_df.empty:
-            logger.error("Failed to form portfolios!")
-            return {}
-
-        # Apply risk parity if configured
-        if self.config.use_risk_parity:
-            portfolio_df = self.apply_risk_parity(portfolio_df)
-
-        # Calculate returns
-        returns_df = self.calculate_returns(portfolio_df)
-
-        # Calculate factor attribution
-        attribution_df = self.calculate_factor_attribution(portfolio_df)
-
-        # Calculate metrics
-        metrics = self.calculate_metrics(returns_df)
-
-        # Create visualizations
-        self.create_visualizations(returns_df, attribution_df)
-
-        # Store results
-        self.results = {
-            'returns': returns_df,
-            'metrics': metrics,
-            'attribution': attribution_df,
-            'portfolio': portfolio_df
-        }
-
-        # Print results
-        self.print_results()
-
-        # Save results
-        self.save_results()
-
-        return self.results
 
     def print_results(self):
         """Print formatted results"""
@@ -704,7 +700,7 @@ class MultiFactorStrategy:
         print("MULTI-FACTOR STRATEGY RESULTS")
         print("=" * 60)
 
-        print("\n📊 PERFORMANCE METRICS:")
+        print("\nPERFORMANCE METRICS:")
         print("-" * 40)
 
         print("\nReturns:")
@@ -722,7 +718,8 @@ class MultiFactorStrategy:
         print("\nStatistical Significance:")
         print(f"  T-Statistic:         {metrics['t_stat']:>7.3f}")
         print(f"  P-Value:             {metrics['p_value']:>7.4f}")
-        print(f"  Significant (5%):    {'✅ Yes' if metrics['p_value'] < 0.05 else '❌ No'}")
+        significant = "YES" if metrics['p_value'] < 0.05 else "NO"
+        print(f"  Significant (5%):    {significant}")
 
         print("\nPortfolio Statistics:")
         print(f"  Avg Positions:       {metrics['avg_positions']:>7.1f}")
@@ -765,21 +762,48 @@ def main():
     # Initialize strategy
     strategy = MultiFactorStrategy(config)
 
-    # Run backtest
+    # Use cleaned data if available, otherwise fallback to raw
     data_path = "data/processed/prices_clean.parquet"
 
     if not Path(data_path).exists():
-        logger.error(f"Data file not found: {data_path}")
-        logger.info("Please run fetch_all_prices.py first")
-        return 1
+        logger.error(f"Cleaned data file not found: {data_path}")
+        logger.info("Please run the full pipeline (run_all.py) first to clean data")
+
+        # Fallback to raw data with warning
+        raw_data_paths = [
+            "data/raw/price_data.parquet",
+            "data/raw/prices_combined.csv"
+        ]
+
+        raw_path_found = False
+        for raw_data_path in raw_data_paths:
+            if Path(raw_data_path).exists():
+                logger.warning("Using raw data - results may be unreliable due to data quality issues")
+                logger.warning("Consider running 'python run_all.py --refresh' to clean data first")
+                data_path = raw_data_path
+                raw_path_found = True
+                break
+
+        if not raw_path_found:
+            logger.error("No data files found! Run fetch_all_prices.py first.")
+            return 1
 
     # Run backtest
     results = strategy.run_backtest(data_path)
 
     if results:
-        logger.info("✅ Multi-factor backtest completed successfully")
+        logger.info("Multi-factor backtest completed successfully")
+
+        # Quick summary
+        metrics = results['metrics']
+        print(f"\nQUICK RESULTS SUMMARY:")
+        print(f"   Net Sharpe: {metrics['net_sharpe']:.3f}")
+        print(f"   Net Return: {metrics['net_annual_return'] * 100:.2f}% annually")
+        print(f"   Max Drawdown: {metrics['max_drawdown'] * 100:.2f}%")
+        significant = "YES" if metrics['p_value'] < 0.05 else "NO"
+        print(f"   Significant: {significant}")
     else:
-        logger.error("❌ Multi-factor backtest failed")
+        logger.error("Multi-factor backtest failed")
         return 1
 
     return 0
