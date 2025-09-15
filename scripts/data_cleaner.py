@@ -16,12 +16,16 @@ import random
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ── Output directory anchored to this file's folder ────────────────────────────
+# ── Paths ─────────────────────────────────────────────────────────────────────
 THIS_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = THIS_DIR / "diagnostics"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+# Project scripts/data root
+DATA_DIR = Path(r"C:\Desktop\BA\PY\my_project\scripts\data")
+
 random.seed(42)
+
 
 def get_price_column(df: pd.DataFrame) -> str:
     if "close_adj" in df.columns:
@@ -31,6 +35,7 @@ def get_price_column(df: pd.DataFrame) -> str:
     if "close_raw" in df.columns:
         return "close_raw"
     raise KeyError("No close price column found (expected close_adj/close/close_raw)")
+
 
 # ── Coverage & Completeness ───────────────────────────────────────────────────
 def plot_time_coverage(df: pd.DataFrame):
@@ -47,6 +52,7 @@ def plot_time_coverage(df: pd.DataFrame):
     plt.savefig(OUTPUT_DIR / "time_coverage_heatmap.png", dpi=150)
     plt.close()
 
+
 def plot_hist_series_length(df: pd.DataFrame):
     logger.info("📈 Plotting histogram of series length...")
     counts = df.groupby("symbol")["date"].count()
@@ -58,6 +64,7 @@ def plot_hist_series_length(df: pd.DataFrame):
     plt.tight_layout()
     plt.savefig(OUTPUT_DIR / "series_length_hist.png", dpi=150)
     plt.close()
+
 
 def plot_missing_data(df: pd.DataFrame):
     logger.info("📈 Plotting missing data heatmap...")
@@ -72,6 +79,7 @@ def plot_missing_data(df: pd.DataFrame):
     plt.savefig(OUTPUT_DIR / "missing_data_heatmap.png", dpi=150)
     plt.close()
 
+
 def plot_trading_calendar_alignment(df: pd.DataFrame):
     logger.info("📈 Plotting trading calendar alignment...")
     counts = df.groupby("date")["symbol"].count()
@@ -83,6 +91,7 @@ def plot_trading_calendar_alignment(df: pd.DataFrame):
     plt.tight_layout()
     plt.savefig(OUTPUT_DIR / "trading_calendar_alignment.png", dpi=150)
     plt.close()
+
 
 # ── Price & Return Validity ───────────────────────────────────────────────────
 def plot_price_examples(df: pd.DataFrame, n=10):
@@ -106,6 +115,7 @@ def plot_price_examples(df: pd.DataFrame, n=10):
     plt.savefig(OUTPUT_DIR / "price_examples.png", dpi=150)
     plt.close()
 
+
 def plot_return_distribution(df: pd.DataFrame):
     logger.info("📈 Plotting return distribution...")
     price_col = get_price_column(df)
@@ -126,6 +136,7 @@ def plot_return_distribution(df: pd.DataFrame):
     plt.tight_layout()
     plt.savefig(OUTPUT_DIR / "return_boxplot.png", dpi=150)
     plt.close()
+
 
 def plot_cumulative_returns(df: pd.DataFrame, n=5):
     logger.info("📈 Plotting cumulative log returns...")
@@ -152,6 +163,7 @@ def plot_cumulative_returns(df: pd.DataFrame, n=5):
     plt.savefig(OUTPUT_DIR / "cumulative_returns.png", dpi=150)
     plt.close()
 
+
 # ── Outlier Detection ─────────────────────────────────────────────────────────
 def plot_top_return_spikes(df: pd.DataFrame):
     logger.info("📈 Plotting top return spikes...")
@@ -171,6 +183,7 @@ def plot_top_return_spikes(df: pd.DataFrame):
     plt.tight_layout()
     plt.savefig(OUTPUT_DIR / "top_return_spikes.png", dpi=150)
     plt.close()
+
 
 def plot_volume_anomalies(df: pd.DataFrame, n=5):
     logger.info("📈 Plotting volume anomalies...")
@@ -194,6 +207,7 @@ def plot_volume_anomalies(df: pd.DataFrame, n=5):
     plt.savefig(OUTPUT_DIR / "volume_anomalies.png", dpi=150)
     plt.close()
 
+
 # ── Currency / Market Effects ─────────────────────────────────────────────────
 def plot_currency_split(df: pd.DataFrame):
     logger.info("📈 Plotting currency split...")
@@ -206,17 +220,35 @@ def plot_currency_split(df: pd.DataFrame):
         plt.savefig(OUTPUT_DIR / "currency_split.png", dpi=150)
         plt.close()
 
+
 # ── Main Runner ───────────────────────────────────────────────────────────────
 def run_all_diagnostics():
     logger.info("🔍 Running all diagnostics...")
 
-    clean_file = THIS_DIR.parent / "data" / "processed" / "prices_clean.parquet"
+    clean_file = DATA_DIR / "processed" / "prices_clean.parquet"
     if not clean_file.exists():
         logger.error(f"❌ Cleaned data not found at: {clean_file}")
         return
 
     df = pd.read_parquet(clean_file)
 
+    # ── Export cleaned ML data ────────────────────────────────────────────────
+    ml_outdir = DATA_DIR / "cleaned"
+    ml_outdir.mkdir(parents=True, exist_ok=True)
+    ml_file = ml_outdir / "ML_data_cleaned.parquet"
+
+    wanted_cols = ["date", "symbol", "open_raw", "high_raw", "low_raw",
+                   "close_raw", "close_adj", "volume"]
+    existing_cols = [c for c in wanted_cols if c in df.columns]
+
+    if not existing_cols:
+        logger.error("❌ No OHLCV columns found in cleaned data.")
+    else:
+        ohlcv = df[existing_cols].copy()
+        ohlcv.to_parquet(ml_file, compression="snappy")
+        logger.info(f"💾 Cleaned ML dataset saved to {ml_file} with columns {existing_cols}")
+
+    # ── Run diagnostics plots ─────────────────────────────────────────────────
     plot_time_coverage(df)
     plot_hist_series_length(df)
     plot_missing_data(df)
@@ -229,6 +261,7 @@ def run_all_diagnostics():
     plot_currency_split(df)
 
     logger.info(f"✅ Diagnostics complete. Plots saved in {OUTPUT_DIR}")
+
 
 if __name__ == "__main__":
     run_all_diagnostics()

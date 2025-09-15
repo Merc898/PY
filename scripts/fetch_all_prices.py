@@ -166,9 +166,15 @@ class DataFetcher:
         })
         prices = prices.sort_values(["symbol", "date"])
 
+        # Standard outputs
         prices.to_parquet(cache_file, compression="snappy")
         prices.to_csv(self.data_dir / "raw" / "prices.csv", index=False)
-        logger.info(f"Saved data to {self.data_dir / 'raw'}")
+
+        # New ML export (only OHLCV, with adj close)
+        ml_path = Path(r"C:\Desktop\BA\PY\my_project\scripts\data\raw") / "ML_data.parquet"
+        ohlcv = prices[["date", "symbol", "open_raw", "high_raw", "low_raw", "close_raw", "close_adj", "volume"]]
+        ohlcv.to_parquet(ml_path, compression="snappy")
+        logger.info(f"Saved ML OHLCV dataset to {ml_path}")
 
         self.print_summary(prices)
         return prices
