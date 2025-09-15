@@ -56,16 +56,16 @@ class FeatureEngineer:
         """Create return-based momentum features"""
         for period in self.config.return_periods:
             # Simple returns
-            df[f'feat_ret_{period}'] = df.groupby(id_col)['adj_close'].pct_change(period)
+            df[f'feat_ret_{period}'] = df.groupby(id_col)['close_adj'].pct_change(period)
 
             # Compound returns
-            df[f'feat_cret_{period}'] = df.groupby(id_col)['adj_close'].transform(
+            df[f'feat_cret_{period}'] = df.groupby(id_col)['close_adj'].transform(
                 lambda x: (x / x.shift(period)) - 1
             )
 
             # Skip-month momentum (e.g., 12-2)
             if period > self.config.skip_periods:
-                df[f'feat_ret_{period}_{self.config.skip_periods}'] = df.groupby(id_col)['adj_close'].transform(
+                df[f'feat_ret_{period}_{self.config.skip_periods}'] = df.groupby(id_col)['close_adj'].transform(
                     lambda x: (x.shift(self.config.skip_periods) / x.shift(period)) - 1
                 )
 
@@ -75,19 +75,19 @@ class FeatureEngineer:
         """Create trend and price location features"""
         for period in self.config.ma_periods:
             # Simple moving average
-            df[f'feat_sma_{period}'] = df.groupby(id_col)['adj_close'].transform(
+            df[f'feat_sma_{period}'] = df.groupby(id_col)['close_adj'].transform(
                 lambda x: x.rolling(period).mean()
             )
-            df[f'feat_sma_gap_{period}'] = (df['adj_close'] - df[f'feat_sma_{period}']) / df[f'feat_sma_{period}']
+            df[f'feat_sma_gap_{period}'] = (df['close_adj'] - df[f'feat_sma_{period}']) / df[f'feat_sma_{period}']
 
             # Exponential moving average
-            df[f'feat_ema_{period}'] = df.groupby(id_col)['adj_close'].transform(
+            df[f'feat_ema_{period}'] = df.groupby(id_col)['close_adj'].transform(
                 lambda x: x.ewm(span=period, adjust=False).mean()
             )
-            df[f'feat_ema_gap_{period}'] = (df['adj_close'] - df[f'feat_ema_{period}']) / df[f'feat_ema_{period}']
+            df[f'feat_ema_gap_{period}'] = (df['close_adj'] - df[f'feat_ema_{period}']) / df[f'feat_ema_{period}']
 
         # MACD
-        df['feat_macd_line'] = df.groupby(id_col)['adj_close'].transform(
+        df['feat_macd_line'] = df.groupby(id_col)['close_adj'].transform(
             lambda x: x.ewm(span=12, adjust=False).mean() - x.ewm(span=26, adjust=False).mean()
         )
         df['feat_macd_signal'] = df.groupby(id_col)['feat_macd_line'].transform(
@@ -98,8 +98,8 @@ class FeatureEngineer:
         # Distance from 52-week high/low
         df['feat_52w_high'] = df.groupby(id_col)['high'].transform(lambda x: x.rolling(252).max())
         df['feat_52w_low'] = df.groupby(id_col)['low'].transform(lambda x: x.rolling(252).min())
-        df['feat_pct_from_52h'] = (df['adj_close'] - df['feat_52w_high']) / df['feat_52w_high']
-        df['feat_pct_from_52l'] = (df['adj_close'] - df['feat_52w_low']) / df['feat_52w_low']
+        df['feat_pct_from_52h'] = (df['close_adj'] - df['feat_52w_high']) / df['feat_52w_high']
+        df['feat_pct_from_52l'] = (df['close_adj'] - df['feat_52w_low']) / df['feat_52w_low']
 
         # Donchian channel breakout
         for period in [20, 50]:
@@ -110,13 +110,13 @@ class FeatureEngineer:
                 lambda x: x.rolling(period).min()
             )
             df[f'feat_donchian_break_{period}'] = (
-                    (df['adj_close'] > df[f'feat_donchian_high_{period}'].shift(1)).astype(int) -
-                    (df['adj_close'] < df[f'feat_donchian_low_{period}'].shift(1)).astype(int)
+                    (df['close_adj'] > df[f'feat_donchian_high_{period}'].shift(1)).astype(int) -
+                    (df['close_adj'] < df[f'feat_donchian_low_{period}'].shift(1)).astype(int)
             )
 
         # Linear trend (OLS slope)
         for period in [20, 60]:
-            df[f'feat_trend_slope_{period}'] = df.groupby(id_col)['adj_close'].transform(
+            df[f'feat_trend_slope_{period}'] = df.groupby(id_col)['close_adj'].transform(
                 lambda x: x.rolling(period).apply(
                     lambda y: np.polyfit(np.arange(len(y)), y, 1)[0] if len(y) == period else np.nan
                 )
@@ -128,7 +128,7 @@ class FeatureEngineer:
         """Create volatility and shape features"""
         # Calculate returns if not present
         if 'returns' not in df.columns:
-            df['returns'] = df.groupby(id_col)['adj_close'].pct_change()
+            df['returns'] = df.groupby(id_col)['close_adj'].pct_change()
 
         for window in self.config.volatility_windows:
             # Standard deviation
@@ -182,12 +182,12 @@ class FeatureEngineer:
     def _create_drawdown_features(self, df: pd.DataFrame, id_col: str) -> pd.DataFrame:
         """Create drawdown-based features"""
         # Running maximum
-        df['running_max'] = df.groupby(id_col)['adj_close'].transform(
+        df['running_max'] = df.groupby(id_col)['close_adj'].transform(
             lambda x: x.expanding().max()
         )
 
         # Drawdown
-        df['feat_drawdown'] = (df['adj_close'] - df['running_max']) / df['running_max']
+        df['feat_drawdown'] = (df['close_adj'] - df['running_max']) / df['running_max']
 
         # Max drawdown over windows
         for window in [60, 120, 252]:
@@ -196,12 +196,13 @@ class FeatureEngineer:
             )
 
         # Time since max
-        df['feat_time_since_max'] = df.groupby(id_col).apply(
-            lambda x: pd.Series(
-                np.arange(len(x)) - x['adj_close'].expanding().idxmax().fillna(0),
-                index=x.index
-            )
-        ).reset_index(level=0, drop=True)
+        def time_since_max(s):
+            cummax = s.cummax()
+            last_max_idx = np.maximum.accumulate(np.where(s == cummax, np.arange(len(s)), -1))
+            return np.arange(len(s)) - last_max_idx
+
+        df['feat_time_since_max'] = df.groupby(id_col)['close_adj'].apply(time_since_max).reset_index(level=0,
+                                                                                                      drop=True)
 
         # Recovery time (periods in drawdown)
         df['in_drawdown'] = (df['feat_drawdown'] < 0).astype(int)
@@ -329,13 +330,21 @@ class FeatureEngineer:
 
         # Winsorize features
         for col in feature_cols:
-            lower = df[col].quantile(self.config.winsorize_quantile)
-            upper = df[col].quantile(1 - self.config.winsorize_quantile)
-            df[col] = df[col].clip(lower=lower, upper=upper)
+            if col not in df.columns:
+                continue
+            series = df[col]
+            if not np.issubdtype(series.dtype, np.number):
+                continue
+
+            lower = series.quantile(self.config.winsorize_quantile)
+            upper = series.quantile(1 - self.config.winsorize_quantile)
+            df[col] = series.clip(lower=lower, upper=upper)
 
         # Standardize features cross-sectionally
         if self.config.standardize:
             for col in feature_cols:
+                if col not in df.columns:
+                    continue
                 df[col] = df.groupby(date_col)[col].transform(
                     lambda x: (x - x.mean()) / (x.std() + 1e-10)
                 )
@@ -343,12 +352,13 @@ class FeatureEngineer:
         # Fill missing values
         if self.config.fillna_method == 'median':
             for col in feature_cols:
+                if col not in df.columns:
+                    continue
                 df[col] = df.groupby(date_col)[col].transform(
                     lambda x: x.fillna(x.median())
                 )
         elif self.config.fillna_method == 'zero':
             df[feature_cols] = df[feature_cols].fillna(0)
-
         # Final fillna with 0 for any remaining NaNs
         df[feature_cols] = df[feature_cols].fillna(0)
 
