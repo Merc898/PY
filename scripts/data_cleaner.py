@@ -41,7 +41,6 @@ def get_price_column(df: pd.DataFrame) -> str:
 def plot_time_coverage(df: pd.DataFrame):
     logger.info("📈 Plotting time coverage heatmap...")
     price_col = get_price_column(df)
-
     pivot = df.pivot_table(index="symbol", columns="date", values=price_col, aggfunc="count").fillna(0)
     plt.figure(figsize=(18, 10))
     sns.heatmap(pivot, cmap="viridis", cbar=False)
@@ -101,7 +100,6 @@ def plot_price_examples(df: pd.DataFrame, n=10):
     if not uniq:
         return
     sample_symbols = random.sample(uniq, min(n, len(uniq)))
-
     plt.figure(figsize=(14, 8))
     for sym in sample_symbols:
         subset = df[df["symbol"] == sym]
@@ -121,7 +119,6 @@ def plot_return_distribution(df: pd.DataFrame):
     price_col = get_price_column(df)
     df_sorted = df.sort_values(["symbol", "date"]).copy()
     df_sorted["return"] = df_sorted.groupby("symbol")[price_col].pct_change()
-
     plt.figure(figsize=(10, 6))
     sns.histplot(df_sorted["return"].dropna(), bins=200, kde=True)
     plt.title("Distribution of Daily Returns")
@@ -129,7 +126,6 @@ def plot_return_distribution(df: pd.DataFrame):
     plt.tight_layout()
     plt.savefig(OUTPUT_DIR / "return_distribution.png", dpi=150)
     plt.close()
-
     plt.figure(figsize=(8, 6))
     sns.boxplot(x=df_sorted["return"].dropna())
     plt.title("Boxplot of Daily Returns")
@@ -145,7 +141,6 @@ def plot_cumulative_returns(df: pd.DataFrame, n=5):
     if not uniq:
         return
     sample_symbols = random.sample(uniq, min(n, len(uniq)))
-
     plt.figure(figsize=(14, 8))
     for sym in sample_symbols:
         subset = df[df["symbol"] == sym].sort_values("date")
@@ -175,7 +170,6 @@ def plot_top_return_spikes(df: pd.DataFrame):
         return
     abs_returns["abs_ret"] = abs_returns["return"].abs()
     top = abs_returns.nlargest(20, "abs_ret")
-
     plt.figure(figsize=(12, 6))
     sns.barplot(data=top, x="date", y="abs_ret", hue="symbol", dodge=False)
     plt.xticks(rotation=45)
@@ -193,7 +187,6 @@ def plot_volume_anomalies(df: pd.DataFrame, n=5):
     if not uniq:
         return
     sample_symbols = random.sample(uniq, min(n, len(uniq)))
-
     plt.figure(figsize=(14, 8))
     for sym in sample_symbols:
         subset = df[df["symbol"] == sym]
@@ -230,35 +223,39 @@ def run_all_diagnostics():
         logger.error(f"❌ Cleaned data not found at: {clean_file}")
         return
 
-    df = pd.read_parquet(clean_file)
+    df_clean = pd.read_parquet(clean_file)
 
     # ── Export cleaned ML data ────────────────────────────────────────────────
     ml_outdir = DATA_DIR / "cleaned"
     ml_outdir.mkdir(parents=True, exist_ok=True)
     ml_file = ml_outdir / "ML_data_cleaned.parquet"
 
-    wanted_cols = ["date", "symbol", "open_raw", "high_raw", "low_raw",
-                   "close_raw", "close_adj", "volume"]
-    existing_cols = [c for c in wanted_cols if c in df.columns]
-
-    if not existing_cols:
-        logger.error("❌ No OHLCV columns found in cleaned data.")
+    raw_file = DATA_DIR / "raw" / "ML_data.parquet"
+    if not raw_file.exists():
+        logger.error(f"❌ Raw ML_data.parquet not found at {raw_file}")
     else:
-        ohlcv = df[existing_cols].copy()
-        ohlcv.to_parquet(ml_file, compression="snappy")
-        logger.info(f"💾 Cleaned ML dataset saved to {ml_file} with columns {existing_cols}")
+        raw_df = pd.read_parquet(raw_file)
+
+        # build cleaned dataset with same columns as raw
+        out_df = raw_df.copy()
+        if "close_adj" in df_clean.columns:
+            out_df["close_adj"] = df_clean.set_index(["date", "symbol"])["close_adj"] \
+                .reindex(out_df.set_index(["date", "symbol"]).index).values
+
+        out_df.to_parquet(ml_file, compression="snappy")
+        logger.info(f"💾 Cleaned ML dataset saved to {ml_file} with columns {list(out_df.columns)}")
 
     # ── Run diagnostics plots ─────────────────────────────────────────────────
-    plot_time_coverage(df)
-    plot_hist_series_length(df)
-    plot_missing_data(df)
-    plot_trading_calendar_alignment(df)
-    plot_price_examples(df)
-    plot_return_distribution(df)
-    plot_cumulative_returns(df)
-    plot_top_return_spikes(df)
-    plot_volume_anomalies(df)
-    plot_currency_split(df)
+    plot_time_coverage(df_clean)
+    plot_hist_series_length(df_clean)
+    plot_missing_data(df_clean)
+    plot_trading_calendar_alignment(df_clean)
+    plot_price_examples(df_clean)
+    plot_return_distribution(df_clean)
+    plot_cumulative_returns(df_clean)
+    plot_top_return_spikes(df_clean)
+    plot_volume_anomalies(df_clean)
+    plot_currency_split(df_clean)
 
     logger.info(f"✅ Diagnostics complete. Plots saved in {OUTPUT_DIR}")
 

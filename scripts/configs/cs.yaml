@@ -1,0 +1,59 @@
+# configs/cs.yaml
+data:
+  prices_path: "C:/Desktop/BA/PY/my_project/scripts/data/cleaned/ML_data_cleaned.parquet"
+  id_column: "symbol"
+  date_column: "date"
+  frequency: "daily"
+  currency: "USD"
+
+features:
+  return_periods: [1, 5, 20, 60, 120, 252]
+  skip_periods: 1
+  ma_periods: [10, 20, 50, 200]
+  volatility_windows: [20, 60]
+  volume_windows: [20]
+  winsorize_quantile: 0.01
+  standardize: true
+  fillna_method: "median"
+
+labels:
+  horizon: 20
+  cs_quantiles: 5
+  cs_top_bottom_only: true
+
+model:
+  model_type: "lightgbm"
+  params:
+    num_leaves: 31
+    learning_rate: 0.03
+    feature_fraction: 0.8
+    bagging_fraction: 0.7
+    bagging_freq: 5
+    min_child_samples: 20
+    n_estimators: 200
+  use_sample_weights: true
+  weight_type: "amihud"
+
+cv:
+  n_splits: 5
+  embargo_periods: 10
+  purge_periods: 10
+  refit_frequency: 60
+  validation_size: 0.2
+  test_size: 0.2
+
+portfolio:
+  strategy_type: "cs"
+  long_only: false
+  max_weight: 0.05
+  rebalance_frequency: 20
+
+costs:
+  fixed_costs_bps: 10.0
+  dynamic_costs: false
+  turnover_penalty: 0.0
+
+output_dir: "outputs/cs"
+seed: 42
+n_jobs: -1
+verbose: 1

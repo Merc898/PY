@@ -157,10 +157,10 @@ class DataFetcher:
         prices["Date"] = pd.to_datetime(prices["Date"], utc=True).dt.tz_localize(None)
         prices = prices.rename(columns={
             "Date": "date",
-            "Open": "open_raw",
-            "High": "high_raw",
-            "Low": "low_raw",
-            "Close": "close_raw",
+            "Open": "open",
+            "High": "high",
+            "Low": "low",
+            "Close": "close",
             "Adj Close": "close_adj",
             "Volume": "volume"
         })
@@ -172,9 +172,9 @@ class DataFetcher:
 
         # New ML export (only OHLCV, with adj close)
         ml_path = Path(r"C:\Desktop\BA\PY\my_project\scripts\data\raw") / "ML_data.parquet"
-        ohlcv = prices[["date", "symbol", "open_raw", "high_raw", "low_raw", "close_raw", "close_adj", "volume"]]
+        ohlcv = prices[["date", "symbol", "open", "high", "low", "close", "close_adj", "volume"]]
         ohlcv.to_parquet(ml_path, compression="snappy")
-        logger.info(f"Saved ML OHLCV dataset to {ml_path}")
+        logger.info(f"Saved ML OHLCV dataset to {ml_path} with columns {list(ohlcv.columns)}")
 
         self.print_summary(prices)
         return prices
