@@ -345,9 +345,10 @@ class FeatureEngineer:
             for col in feature_cols:
                 if col not in df.columns:
                     continue
-                df[col] = df.groupby(date_col)[col].transform(
-                    lambda x: (x - x.mean()) / (x.std() + 1e-10)
+                standardized = df.groupby(date_col)[col].transform(
+                    lambda x: (x - x.mean(skipna=True)) / (x.std(skipna=True) + 1e-10)
                 )
+                df[col] = standardized.values  # force alignment with df
 
         # Fill missing values
         if self.config.fillna_method == 'median':
